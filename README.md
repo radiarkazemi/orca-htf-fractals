@@ -2,37 +2,37 @@
 
 TradingView Pine Script v6 indicator for multi-timeframe **dealing-range** highs/lows.
 
-## Anchor pattern (America/New_York)
-
-| Side | Candle | FxPro XAU ≈ |
-|------|--------|-------------|
-| High | Fri 31 Jul 2026 **02:00** | ~4088 |
-| Low  | Fri 31 Jul 2026 **10:00** | ~4022 |
-
-`02:00` is a **lower high** after the Jul 30 peak. Older HH/MS logic kept the peak and skipped it.
+Nothing is date-hardcoded. Fri 31 Jul 2026 02:00 / 10:00 is only a test anchor.
 
 ## Logic
 
-1. Build a major ZigZag leg (`Major leg × ATR`, default 3.0)
-2. On a bearish leg, mark:
-   - last **internal** fractal lower-high **before** the leg low → `02:00`
-   - the leg low → `10:00`
-3. Bounce highs after the low (e.g. Fri 15:00) are ignored
-4. Default **Show ONLY latest High + latest Low** → one clean dealing-range pair
+1. Detect a major ZigZag leg when the move is at least `Major leg × ATR`
+2. Bearish leg → mark last **internal lower-high before the low** + the **leg low**
+3. Bullish leg → mirror (internal higher-low + leg high)
+4. When the leg reverses, that pair is **saved into history**
+5. The active (in-progress) leg also shows a live pair
+
+## Settings that matter
+
+| Input | Default | Effect |
+|-------|---------|--------|
+| Major leg (× ATR) | 3.0 | Lower = more marks, higher = fewer |
+| Show ONLY latest High + latest Low | **false** | Must be off to see history |
+| Show live dealing range | true | Marks the current unfinished leg |
+| Keep last N | 12 | History depth |
 
 ## Timeframe map
 
 | Chart | Shows |
 |-------|--------|
-| 1H | 1H dealing range |
-| 15m | 1H dealing range |
-| 5m | 15m dealing range |
-| 1m | 5m dealing range |
+| 1H | 1H dealing ranges |
+| 15m | 1H dealing ranges |
+| 5m | 15m dealing ranges |
+| 1m | 5m dealing ranges |
 
 ## How to use
 
-1. Copy [`Orca_HTF_Fractals.pine`](./Orca_HTF_Fractals.pine)
-2. TradingView → Pine Editor → Paste → Save → Add to chart
-3. Chart timezone **UTC-4 / America/New_York**
-4. On **1H**, confirm 😊 on Fri 02:00 high and Fri 10:00 low
-5. If too quiet/noisy, adjust **Major leg (× ATR)** (try 2.5–4.0)
+1. Copy [`Orca_HTF_Fractals.pine`](./Orca_HTF_Fractals.pine) into TradingView Pine Editor
+2. Add to chart (timezone America/New_York)
+3. Confirm Fri 02:00 H + Fri 10:00 L **and** earlier legs are also marked
+4. Tune **Major leg (× ATR)** if you want denser or cleaner marks
