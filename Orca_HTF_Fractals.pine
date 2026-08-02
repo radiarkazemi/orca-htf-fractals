@@ -2,25 +2,36 @@
 indicator('Orca HTF Fractals', overlay = true, max_labels_count = 500, max_lines_count = 100)
 
 // =========================================================
-// 1H FIRST — cover the emoji dots (~4088 H / ~4022 L)
+// Dealing-range highs / lows via ALTERNATING market structure
 //
-// Those dots are Williams fractals (pivot H/L), NOT MSS swings.
-// MSS was marking ~4118 / ~4000 and missing yours.
+// Anchor (XAU / GC, America/New_York):
+//   Fri 31 Jul 2026  02:00  → HIGH  (1H swing high)
+//   Fri 31 Jul 2026  10:00  → LOW   (1H swing low)
+//
+// Those are NOT every Williams fractal. Example noise on that
+// day: 05:00 is also a fractal low, but the real dealing-range
+// low is the more extreme 10:00 swing.
+//
+// Method:
+//   1) Fractal pivots (left/right) are candidates
+//   2) Keep alternating H↔L swings
+//   3) Same direction → update if more extreme (05:00 L → 10:00 L)
+//   4) Optional min leg (× ATR) before accepting opposite swing
 //
 // Map:
-//   1H  → 1H fractals (local)
-//   15m → 1H fractals
-//   5m  → 15m fractals
-//   1m  → 5m fractals
+//   1H  → 1H swings (local)
+//   15m → 1H swings
+//   5m  → 15m swings
+//   1m  → 5m swings
 // =========================================================
 
-left  = input.int(2, 'Fractal Left',  minval = 1, group = 'Fractal')
-right = input.int(2, 'Fractal Right', minval = 1, group = 'Fractal')
+left  = input.int(2, 'Pivot Left',  minval = 1, group = 'Structure')
+right = input.int(2, 'Pivot Right', minval = 1, group = 'Structure')
 
-// Ignore tiny pivots: new fractal must be at least this many ATRs from previous opposite fractal
-minSwingAtr = input.float(1.0, 'Min swing (× ATR)', minval = 0.0, step = 0.1, group = 'Filter')
-atrLen      = input.int(14, 'ATR Length', minval = 1, group = 'Filter')
-keepLastN   = input.int(30, 'Keep last N highs + N lows (0 = all)', minval = 0, group = 'Filter')
+minLegAtr = input.float(1.0, 'Min leg (× ATR) to accept opposite swing', minval = 0.0, step = 0.1, group = 'Filter')
+atrLen    = input.int(14, 'ATR Length', minval = 1, group = 'Filter')
+keepLastN = input.int(20, 'Keep last N highs + N lows (0 = all)', minval = 0, group = 'Filter')
+onlyLatestPair = input.bool(false, 'Show ONLY latest High + latest Low', group = 'Filter')
 
 highColor   = input.color(color.red,  'High Color', group = 'Style')
 lowColor    = input.color(color.lime, 'Low Color',  group = 'Style')
@@ -53,61 +64,134 @@ srcTf = f_source_tf()
 srcName = srcTf == '5' ? '5m' : srcTf == '15' ? '15m' : srcTf == '60' ? '1H' : srcTf == '240' ? '4H' : srcTf
 useLocal = timeframe.period == srcTf
 
+// emit: 0 = none, 1 = new opposite swing, 2 = update same-side extreme
+f_try_high(float px, int dirIn, float lastHIn, float lastLIn, float minLeg) =>
+    int dirOut = dirIn
+    float lastHOut = lastHIn
+    int emit = 0
+    if dirIn == 1
+        if px >= lastHIn
+            lastHOut := px
+            emit := 2
+    else
+        bool legOk = dirIn == 0 or minLegAtr == 0.0 or na(lastLIn) or math.abs(px - lastLIn) >= minLeg
+        if legOk
+            lastHOut := px
+            dirOut := 1
+            emit := 1
+    [dirOut, lastHOut, emit]
+
+f_try_low(float px, int dirIn, float lastHIn, float lastLIn, float minLeg) =>
+    int dirOut = dirIn
+    float lastLOut = lastLIn
+    int emit = 0
+    if dirIn == -1
+        if px <= lastLIn
+            lastLOut := px
+            emit := 2
+    else
+        bool legOk = dirIn == 0 or minLegAtr == 0.0 or na(lastHIn) or math.abs(px - lastHIn) >= minLeg
+        if legOk
+            lastLOut := px
+            dirOut := -1
+            emit := 1
+    [dirOut, lastLOut, emit]
+
 // =========================================================
-// Fractal engine on source TF
-// Returns HIGH and LOW in the same bar if both confirm
+// Alternating MS engine on source TF
+// Returns: hPrice, hTime, hUpd(0/1), lPrice, lTime, lUpd(0/1)
 // =========================================================
-f_fractal_event() =>
+f_ms_event() =>
     float ph = ta.pivothigh(high, left, right)
     float pl = ta.pivotlow(low,  left, right)
     float atr = ta.atr(atrLen)
-    float minDist = minSwingAtr * atr
+    float minLeg = minLegAtr * atr
 
-    var float prevH = na
-    var float prevL = na
+    // last accepted swing type: 1 = high, -1 = low, 0 = none
+    var int   dir = 0
+    var float lastH = na
+    var float lastL = na
 
     float hPrice = na
     int   hTime  = na
+    int   hUpd   = 0
     float lPrice = na
     int   lTime  = na
+    int   lUpd   = 0
 
-    if not na(ph)
-        bool farEnough = na(prevL) or math.abs(ph - prevL) >= minDist or minSwingAtr == 0
-        bool notDup = na(prevH) or math.abs(ph - prevH) >= syminfo.mintick
-        if farEnough and notDup
-            hPrice := ph
-            hTime  := time[right]
-            prevH := ph
+    bool haveH = not na(ph)
+    bool haveL = not na(pl)
 
-    if not na(pl)
-        bool farEnough = na(prevH) or math.abs(pl - prevH) >= minDist or minSwingAtr == 0
-        bool notDup = na(prevL) or math.abs(pl - prevL) >= syminfo.mintick
-        if farEnough and notDup
-            lPrice := pl
-            lTime  := time[right]
-            prevL := pl
+    // If both confirm together, process the side that continues/starts
+    // from current dir first (expect opposite after a committed swing).
+    bool highFirst = true
+    if haveH and haveL
+        highFirst := dir != 1
 
-    [hPrice, hTime, lPrice, lTime]
+    if haveH or haveL
+        int   d = dir
+        float lh = lastH
+        float ll = lastL
+
+        if highFirst and haveH
+            [d1, lh1, eH] = f_try_high(ph, d, lh, ll, minLeg)
+            d := d1
+            lh := lh1
+            if eH > 0
+                hPrice := ph
+                hTime := time[right]
+                hUpd := eH == 2 ? 1 : 0
+
+        if haveL
+            [d2, ll2, eL] = f_try_low(pl, d, lh, ll, minLeg)
+            d := d2
+            ll := ll2
+            if eL > 0
+                lPrice := pl
+                lTime := time[right]
+                lUpd := eL == 2 ? 1 : 0
+
+        if not highFirst and haveH
+            [d3, lh3, eH2] = f_try_high(ph, d, lh, ll, minLeg)
+            d := d3
+            lh := lh3
+            if eH2 > 0
+                hPrice := ph
+                hTime := time[right]
+                hUpd := eH2 == 2 ? 1 : 0
+
+        dir := d
+        lastH := lh
+        lastL := ll
+
+    [hPrice, hTime, hUpd, lPrice, lTime, lUpd]
 
 float evHPrice = na
 int   evHTime  = na
+int   evHUpd   = 0
 float evLPrice = na
 int   evLTime  = na
+int   evLUpd   = 0
 
 if useLocal
-    [h0, ht0, l0, lt0] = f_fractal_event()
+    [h0, ht0, hu0, l0, lt0, lu0] = f_ms_event()
     evHPrice := h0
     evHTime  := ht0
+    evHUpd   := hu0
     evLPrice := l0
     evLTime  := lt0
+    evLUpd   := lu0
 else
-    [h1, ht1, l1, lt1] = request.security(syminfo.tickerid, srcTf, f_fractal_event(), gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off)
+    [h1, ht1, hu1, l1, lt1, lu1] = request.security(syminfo.tickerid, srcTf, f_ms_event(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
     evHPrice := h1
     evHTime  := ht1
+    evHUpd   := hu1
     evLPrice := l1
     evLTime  := lt1
+    evLUpd   := lu1
+
 // =========================================================
-// Store + draw (keep history so 4088 / 4022 stay visible)
+// Store + draw
 // =========================================================
 var array<int>   hiTimes  = array.new_int()
 var array<float> hiPrices = array.new_float()
@@ -122,6 +206,18 @@ var array<label> loTags   = array.new_label()
 var array<label> loEmos   = array.new_label()
 
 var line midLn = na
+
+f_del_side(arrM, arrG, arrE, arrT, arrP) =>
+    if array.size(arrM) > 0
+        label.delete(array.pop(arrM))
+        label oldG = array.pop(arrG)
+        if not na(oldG)
+            label.delete(oldG)
+        label oldE = array.pop(arrE)
+        if not na(oldE)
+            label.delete(oldE)
+        array.pop(arrT)
+        array.pop(arrP)
 
 f_trim(arrT, arrP, arrM, arrG, arrE) =>
     if keepLastN > 0
@@ -148,24 +244,39 @@ f_already(arrT, arrP, t, p) =>
                 break
     found
 
+f_add_high(t, p) =>
+    array.push(hiTimes, t)
+    array.push(hiPrices, p)
+    array.push(hiMarks, label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_triangledown, size = markSize, text = '', color = highColor))
+    array.push(hiTags, showTags ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_label_down, size = size.small, text = srcName + ' H', textcolor = highColor, color = color.new(color.black, 100)) : na)
+    array.push(hiEmos, showEmoji ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
+
+f_add_low(t, p) =>
+    array.push(loTimes, t)
+    array.push(loPrices, p)
+    array.push(loMarks, label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_triangleup, size = markSize, text = '', color = lowColor))
+    array.push(loTags, showTags ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_label_up, size = size.small, text = srcName + ' L', textcolor = lowColor, color = color.new(color.black, 100)) : na)
+    array.push(loEmos, showEmoji ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
+
 bool newHigh = not na(evHPrice) and not na(evHTime)
 bool newLow  = not na(evLPrice) and not na(evLTime)
 
-if newHigh and not f_already(hiTimes, hiPrices, evHTime, evHPrice)
-    array.push(hiTimes, evHTime)
-    array.push(hiPrices, evHPrice)
-    array.push(hiMarks, label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_triangledown, size = markSize, text = '', color = highColor))
-    array.push(hiTags, showTags ? label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_label_down, size = size.small, text = srcName + ' H', textcolor = highColor, color = color.new(color.black, 100)) : na)
-    array.push(hiEmos, showEmoji ? label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
-    f_trim(hiTimes, hiPrices, hiMarks, hiTags, hiEmos)
+if newHigh
+    bool dup = f_already(hiTimes, hiPrices, evHTime, evHPrice)
+    if not dup
+        if evHUpd == 1 or onlyLatestPair
+            f_del_side(hiMarks, hiTags, hiEmos, hiTimes, hiPrices)
+        f_add_high(evHTime, evHPrice)
+        f_trim(hiTimes, hiPrices, hiMarks, hiTags, hiEmos)
 
-if newLow and not f_already(loTimes, loPrices, evLTime, evLPrice)
-    array.push(loTimes, evLTime)
-    array.push(loPrices, evLPrice)
-    array.push(loMarks, label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_triangleup, size = markSize, text = '', color = lowColor))
-    array.push(loTags, showTags ? label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_label_up, size = size.small, text = srcName + ' L', textcolor = lowColor, color = color.new(color.black, 100)) : na)
-    array.push(loEmos, showEmoji ? label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
-    f_trim(loTimes, loPrices, loMarks, loTags, loEmos)
+if newLow
+    bool dupL = f_already(loTimes, loPrices, evLTime, evLPrice)
+    if not dupL
+        if evLUpd == 1 or onlyLatestPair
+            f_del_side(loMarks, loTags, loEmos, loTimes, loPrices)
+        f_add_low(evLTime, evLPrice)
+        f_trim(loTimes, loPrices, loMarks, loTags, loEmos)
+
 // 50% between latest high and latest low
 if showMid and array.size(hiPrices) > 0 and array.size(loPrices) > 0
     if newHigh or newLow
@@ -178,7 +289,9 @@ if showMid and array.size(hiPrices) > 0 and array.size(loPrices) > 0
         float mid = (lh + ll) / 2.0
         midLn := line.new(math.min(th, tl), mid, math.max(th, tl), mid, xloc = xloc.bar_time, extend = extend.right, color = midColor, width = 2, style = line.style_dotted)
 
-var table info = table.new(position.top_right, 1, 2, bgcolor = color.new(color.black, 70))
+var table info = table.new(position.top_right, 1, 3, bgcolor = color.new(color.black, 70))
 if barstate.islast
     table.cell(info, 0, 0, 'Chart: ' + timeframe.period, text_color = color.white, text_size = size.small)
-    table.cell(info, 0, 1, 'Showing: ' + srcName + ' fractals', text_color = color.aqua, text_size = size.small)
+    table.cell(info, 0, 1, 'Showing: ' + srcName + ' MS swings', text_color = color.aqua, text_size = size.small)
+    string lastHL = array.size(hiPrices) > 0 and array.size(loPrices) > 0 ? str.tostring(array.get(hiPrices, array.size(hiPrices) - 1), format.mintick) + ' / ' + str.tostring(array.get(loPrices, array.size(loPrices) - 1), format.mintick) : '—'
+    table.cell(info, 0, 2, 'Latest H/L: ' + lastHL, text_color = color.yellow, text_size = size.small)
