@@ -1,0 +1,209 @@
+//@version=6
+indicator('Orca HTF Fractals', overlay = true, max_labels_count = 500, max_lines_count = 100)
+
+// =========================================================
+// FIX (1H first):
+//   OLD (wrong): MSS marker at trkHigh/trkLow  → absolute extreme
+//                e.g. 4120 / 3995  (not your emoji dots)
+//   NEW (correct): MSS marker at lastSH/lastSL → latest swing
+//                e.g. ~4088 / ~4022  (your emoji dots)
+//
+// Map:
+//   1H chart  → 1H signals (local)
+//   15m chart → 1H signals
+//   5m  chart → 15m signals
+//   1m  chart → 5m signals
+// =========================================================
+
+left  = input.int(2, 'Bars Left',  minval = 1, group = 'Structure')
+right = input.int(2, 'Bars Right', minval = 1, group = 'Structure')
+breakType = input.string('Close (Body)', 'Break Confirm', options = ['Wick (High/Low)', 'Close (Body)'], group = 'Structure')
+
+onlyLatestPair = input.bool(true, 'Show ONLY latest High + latest Low (no noise)', group = 'Filter')
+
+highColor   = input.color(color.red,  'High Color', group = 'Style')
+lowColor    = input.color(color.lime, 'Low Color',  group = 'Style')
+markSizeStr = input.string('Normal', 'Marker Size', options = ['Tiny','Small','Normal','Large','Huge'], group = 'Style')
+showTags    = input.bool(true, 'Show H/L tags', group = 'Style')
+showMid     = input.bool(true, 'Show 50% line', group = 'Style')
+midColor    = input.color(color.orange, '50% color', group = 'Style')
+showEmoji   = input.bool(true, 'Show 😊 on markers', group = 'Style')
+
+markSize = markSizeStr == 'Tiny' ? size.tiny : markSizeStr == 'Small' ? size.small : markSizeStr == 'Normal' ? size.normal : markSizeStr == 'Large' ? size.large : size.huge
+useHighOrClose = breakType == 'Wick (High/Low)' ? high : close
+useLowOrClose  = breakType == 'Wick (High/Low)' ? low  : close
+
+f_source_tf() =>
+    string tf = timeframe.period
+    string out = '60'
+    if tf == '1'
+        out := '5'
+    else if tf == '5'
+        out := '15'
+    else if tf == '15'
+        out := '60'
+    else if tf == '30'
+        out := '60'
+    else if tf == '60'
+        out := '60'
+    else if tf == '240'
+        out := '240'
+    else if tf == '3'
+        out := '15'
+    out
+
+srcTf = f_source_tf()
+srcName = srcTf == '5' ? '5m' : srcTf == '15' ? '15m' : srcTf == '60' ? '1H' : srcTf == '240' ? '4H' : srcTf
+useLocal = timeframe.period == srcTf
+
+// =========================================================
+// MSS → mark LAST SWING (lastSH / lastSL), not running extreme
+// outDir: -1 = HIGH (red), +1 = LOW (green)
+// =========================================================
+f_mss_swing() =>
+    float ph = ta.pivothigh(high, left, right)
+    float pl = ta.pivotlow(low,  left, right)
+
+    var float lastSH = na
+    var float lastSL = na
+    var int   lastSHBar = na
+    var int   lastSLBar = na
+    var int   lastSHTime = na
+    var int   lastSLTime = na
+
+    if not na(ph)
+        lastSH := ph
+        lastSHBar := bar_index - right
+        lastSHTime := time[right]
+    if not na(pl)
+        lastSL := pl
+        lastSLBar := bar_index - right
+        lastSLTime := time[right]
+
+    var int brokenSHBar = na
+    var int brokenSLBar = na
+    var int structureDir = 0
+    var int lastBOSDir = na
+
+    bool bullBOS = not na(lastSH) and useHighOrClose > lastSH and (na(brokenSHBar) or brokenSHBar != lastSHBar)
+    bool bearBOS = not na(lastSL) and useLowOrClose < lastSL and (na(brokenSLBar) or brokenSLBar != lastSLBar)
+
+    int  preStruct = structureDir
+    bool mssPlus   = bullBOS and preStruct == -1
+    bool mssMinus  = bearBOS and preStruct == 1
+
+    float outPrice = na
+    int   outDir   = na
+    int   outTime  = na
+
+    // KEY FIX: use latest swing, NOT trkHigh/trkLow
+    // MSS- → latest swing HIGH (lastSH)  → your ~4088 emoji
+    if mssMinus and not na(lastSH) and not na(lastSHTime)
+        outPrice := lastSH
+        outDir   := -1
+        outTime  := lastSHTime
+
+    // MSS+ → latest swing LOW (lastSL)   → your ~4022 emoji
+    if mssPlus and not na(lastSL) and not na(lastSLTime)
+        outPrice := lastSL
+        outDir   := 1
+        outTime  := lastSLTime
+
+    if bullBOS
+        brokenSHBar := lastSHBar
+        structureDir := 1
+        lastBOSDir := 1
+
+    if bearBOS
+        brokenSLBar := lastSLBar
+        structureDir := -1
+        lastBOSDir := -1
+
+    [outPrice, outDir, outTime]
+
+float evPrice = na
+int   evDir   = na
+int   evTime  = na
+
+if useLocal
+    [p0, d0, t0] = f_mss_swing()
+    evPrice := p0
+    evDir   := d0
+    evTime  := t0
+else
+    [p1, d1, t1] = request.security(syminfo.tickerid, srcTf, f_mss_swing(), gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off)
+    evPrice := p1
+    evDir   := d1
+    evTime  := t1
+
+// =========================================================
+// Draw (optionally only latest High + latest Low)
+// =========================================================
+var label lbHigh = na
+var label lbHighTag = na
+var label lbHighEmo = na
+var label lbLow = na
+var label lbLowTag = na
+var label lbLowEmo = na
+var float lastH = na
+var float lastL = na
+var int   lastHT = na
+var int   lastLT = na
+var line  midLn = na
+
+f_delete_high() =>
+    if not na(lbHigh)
+        label.delete(lbHigh)
+    if not na(lbHighTag)
+        label.delete(lbHighTag)
+    if not na(lbHighEmo)
+        label.delete(lbHighEmo)
+
+f_delete_low() =>
+    if not na(lbLow)
+        label.delete(lbLow)
+    if not na(lbLowTag)
+        label.delete(lbLowTag)
+    if not na(lbLowEmo)
+        label.delete(lbLowEmo)
+
+bool newHigh = not na(evPrice) and evDir == -1 and not na(evTime)
+bool newLow  = not na(evPrice) and evDir == 1  and not na(evTime)
+
+if newHigh
+    if na(lastHT) or evTime != lastHT or evPrice != lastH
+        if onlyLatestPair
+            f_delete_high()
+        lbHigh := label.new(x = evTime, y = evPrice, xloc = xloc.bar_time, style = label.style_triangledown, size = markSize, text = '', color = highColor)
+        if showTags
+            lbHighTag := label.new(x = evTime, y = evPrice, xloc = xloc.bar_time, style = label.style_label_down, size = size.small, text = srcName + ' H', textcolor = highColor, color = color.new(color.black, 100))
+        if showEmoji
+            lbHighEmo := label.new(x = evTime, y = evPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100))
+        lastH  := evPrice
+        lastHT := evTime
+
+if newLow
+    if na(lastLT) or evTime != lastLT or evPrice != lastL
+        if onlyLatestPair
+            f_delete_low()
+        lbLow := label.new(x = evTime, y = evPrice, xloc = xloc.bar_time, style = label.style_triangleup, size = markSize, text = '', color = lowColor)
+        if showTags
+            lbLowTag := label.new(x = evTime, y = evPrice, xloc = xloc.bar_time, style = label.style_label_up, size = size.small, text = srcName + ' L', textcolor = lowColor, color = color.new(color.black, 100))
+        if showEmoji
+            lbLowEmo := label.new(x = evTime, y = evPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100))
+        lastL  := evPrice
+        lastLT := evTime
+
+if showMid and not na(lastH) and not na(lastL) and not na(lastHT) and not na(lastLT)
+    if newHigh or newLow
+        if not na(midLn)
+            line.delete(midLn)
+        float mid = (lastH + lastL) / 2.0
+        int t1 = math.min(lastHT, lastLT)
+        int t2 = math.max(lastHT, lastLT)
+        midLn := line.new(t1, mid, t2, mid, xloc = xloc.bar_time, extend = extend.right, color = midColor, width = 2, style = line.style_dotted)
+
+var table info = table.new(position.top_right, 1, 2, bgcolor = color.new(color.black, 70))
+if barstate.islast
+    table.cell(info, 0, 0, 'Chart: ' + timeframe.period, text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 1, 'Showing: ' + srcName + ' swing @ MSS', text_color = color.aqua, text_size = size.small)
