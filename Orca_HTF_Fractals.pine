@@ -94,9 +94,15 @@ f_dr_event() =>
     int   liveLT = na
     bool flipped = false
     float winHi = ta.highest(high, lb)
-    int   winHiAgo = ta.highestbars(high, lb)
     float winLo = ta.lowest(low, lb)
-    int   winLoAgo = ta.lowestbars(low, lb)
+    // ta.highestbars / lowestbars return NEGATIVE offsets (e.g. -7).
+    // The [] operator needs a non-negative bars-ago index.
+    int winHiAgo = ta.highestbars(high, lb)
+    int winLoAgo = ta.lowestbars(low, lb)
+    int winHiBack = na(winHiAgo) ? 0 : math.min(lb - 1, int(math.abs(winHiAgo)))
+    int winLoBack = na(winLoAgo) ? 0 : math.min(lb - 1, int(math.abs(winLoAgo)))
+    int winHiT = time[winHiBack]
+    int winLoT = time[winLoBack]
 
     if dir == 0
         if na(legHi)
@@ -123,14 +129,14 @@ f_dr_event() =>
             legHi := high
             legHiT := time
             drOppPx := winLo
-            drOppT := time[winLoAgo]
+            drOppT := winLoT
             legActive := not na(legLo) and legHi - legLo >= thr
         else
             if low <= legLo
                 legLo := low
                 legLoT := time
                 drOppPx := winHi
-                drOppT := time[winHiAgo]
+                drOppT := winHiT
             if legHi - legLo >= thr
                 legActive := true
             if legActive and not na(drOppPx) and high - legLo >= thr
@@ -153,14 +159,14 @@ f_dr_event() =>
             legLo := low
             legLoT := time
             drOppPx := winHi
-            drOppT := time[winHiAgo]
+            drOppT := winHiT
             legActive := not na(legHi) and legHi - legLo >= thr
         else
             if high >= legHi
                 legHi := high
                 legHiT := time
                 drOppPx := winLo
-                drOppT := time[winLoAgo]
+                drOppT := winLoT
             if legHi - legLo >= thr
                 legActive := true
             if legActive and not na(drOppPx) and legHi - low >= thr
