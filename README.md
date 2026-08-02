@@ -1,38 +1,34 @@
 # Orca HTF Fractals
 
-TradingView Pine Script v6 indicator for multi-timeframe **dealing-range** highs/lows.
+TradingView Pine Script v6 dealing-range highs/lows. **Not date-hardcoded.**
 
-Nothing is date-hardcoded. Fri 31 Jul 2026 02:00 / 10:00 is only a test anchor.
+## Test anchor (NY time)
 
-## Logic
-
-1. Detect a major ZigZag leg when the move is at least `Major leg × ATR`
-2. Bearish leg → mark last **internal lower-high before the low** + the **leg low**
-3. Bullish leg → mirror (internal higher-low + leg high)
-4. When the leg reverses, that pair is **saved into history**
-5. The active (in-progress) leg also shows a live pair
-
-## Settings that matter
-
-| Input | Default | Effect |
-|-------|---------|--------|
-| Major leg (× ATR) | 3.0 | Lower = more marks, higher = fewer |
-| Show ONLY latest High + latest Low | **false** | Must be off to see history |
-| Show live dealing range | true | Marks the current unfinished leg |
-| Keep last N | 12 | History depth |
+| Side | Candle |
+|------|--------|
+| High | Fri 31 Jul 2026 **02:00** area |
+| Low  | Fri 31 Jul 2026 **10:00** |
 
 ## Timeframe map
 
 | Chart | Shows |
 |-------|--------|
 | 1H | 1H dealing ranges |
-| 15m | 1H dealing ranges |
-| 5m | 15m dealing ranges |
+| 15m | **1H** dealing ranges |
+| 5m | **15m** dealing ranges |
 | 1m | 5m dealing ranges |
 
-## How to use
+So on **5m** you should see a **15m H** near the Fri 02:00/02:15 high (same selloff that 1H marks at 02:00).
 
-1. Copy [`Orca_HTF_Fractals.pine`](./Orca_HTF_Fractals.pine) into TradingView Pine Editor
-2. Add to chart (timezone America/New_York)
-3. Confirm Fri 02:00 H + Fri 10:00 L **and** earlier legs are also marked
-4. Tune **Major leg (× ATR)** if you want denser or cleaner marks
+## Logic
+
+1. Major ZigZag leg (`Major leg × ATR`)
+2. Opposite DR side = highest high / lowest low in the last `DR window (hours)` from the leg extreme (default 8h) — so 15m does not stick a tiny 09:15 LH over 02:15
+3. If a bullish leg is invalidated by a new LL, flip bearish and keep the prior high (keeps 02:15 → 10:00 on 15m)
+4. Completed legs are stored in history; live leg updates too
+
+## Settings
+
+- **Show ONLY latest…** = off (to see history)
+- **DR window (hours)** = 8
+- **Major leg (× ATR)** = 3 (lower = more marks)

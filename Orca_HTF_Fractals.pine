@@ -4,26 +4,26 @@ indicator('Orca HTF Fractals', overlay = true, max_labels_count = 500, max_lines
 // =========================================================
 // Dealing-range H/L  (NOT date-hardcoded)
 //
-// Example anchor on FxPro XAUUSD (NY time) — for testing only:
-//   Fri 31 Jul 2026 02:00 lower-high  +  10:00 leg-low
-// Any other major leg on the chart is marked the same way.
+// Test anchor (FxPro XAUUSD, NY):
+//   Fri 31 Jul 2026 02:00 area high  +  10:00 low
 //
-// Method:
-//   1) Major ZigZag leg when move >= zzAtr × ATR
-//   2) On a bearish leg: DR high = last internal fractal
-//      lower-high BEFORE the leg low; DR low = leg low
-//   3) On a bullish leg: mirror (internal higher-low + leg high)
-//   4) When the leg reverses, that pair is FINALIZED into history
-//   5) Active leg also shows a live updating pair
+// Why 5m was missing 02:00 while 1H/15m looked fine:
+//   15m chart shows 1H signals → 02:00 (1H candle) ✓
+//   5m chart shows 15m signals → old logic used LAST 15m
+//   fractal LH before the low (09:15), overwriting 02:15.
+//
+// Fix:
+//   Major ZigZag finds the leg. DR endpoints =
+//     bearish: lowest low of leg + HIGHEST HIGH in the last
+//              `drHours` before that low (→ 02:00/02:15)
+//     bullish: mirror with lowest low in the window
 //
 // Map: 1H→1H | 15m→1H | 5m→15m | 1m→5m
 // =========================================================
 
-left  = input.int(2, 'Pivot Left',  minval = 1, group = 'Structure')
-right = input.int(2, 'Pivot Right', minval = 1, group = 'Structure')
-
-zzAtr  = input.float(3.0, 'Major leg (× ATR)', minval = 0.5, step = 0.5, group = 'Filter', tooltip = 'Lower = more dealing ranges. Raise = fewer / bigger legs.')
-atrLen = input.int(14, 'ATR Length', minval = 1, group = 'Filter')
+zzAtr   = input.float(3.0, 'Major leg (× ATR)', minval = 0.5, step = 0.5, group = 'Filter')
+atrLen  = input.int(14, 'ATR Length', minval = 1, group = 'Filter')
+drHours = input.float(8.0, 'DR window (hours)', minval = 1.0, step = 0.5, group = 'Filter', tooltip = 'Look back this many hours from the leg extreme to place the opposite DR side. 8h keeps Fri 02:00 with the 10:00 low on 15m.')
 keepLastN = input.int(12, 'Keep last N highs + N lows (0 = all)', minval = 0, group = 'Filter')
 onlyLatestPair = input.bool(false, 'Show ONLY latest High + latest Low', group = 'Filter')
 showLive = input.bool(true, 'Show live (in-progress) dealing range', group = 'Filter')
@@ -59,25 +59,30 @@ srcTf = f_source_tf()
 srcName = srcTf == '5' ? '5m' : srcTf == '15' ? '15m' : srcTf == '60' ? '1H' : srcTf == '240' ? '4H' : srcTf
 useLocal = timeframe.period == srcTf
 
+// Bars covering drHours on the evaluated series (local or security HTF).
+// +1 so that from 10:00, an 8h window still includes the 02:00 bar.
+f_dr_bars() =>
+    int sec = timeframe.in_seconds()
+    int bars = sec > 0 ? int(math.floor(drHours * 3600.0 / sec)) + 1 : 1
+    math.max(2, bars)
+
 // =========================================================
-// Returns:
-//   finH/finHT / finL/finLT  — finalized pair when a major leg completes (else na)
-//   liveH/liveHT / liveL/liveLT — current in-progress pair (else na)
+// fin* = finalized when a major leg reverses
+// live* = in-progress dealing range
 // =========================================================
 f_dr_event() =>
-    float ph = ta.pivothigh(high, left, right)
-    float pl = ta.pivotlow(low,  left, right)
     float atr = ta.atr(atrLen)
     float thr = zzAtr * atr
+    int   lb = f_dr_bars()
 
     var int   dir = 0
     var float legHi = na
     var int   legHiT = na
     var float legLo = na
     var int   legLoT = na
-    var float intPx = na
-    var int   intT = na
     var bool  legActive = false
+    var float drOppPx = na
+    var int   drOppT = na
 
     float finH = na
     int   finHT = na
@@ -87,20 +92,11 @@ f_dr_event() =>
     int   liveHT = na
     float liveL = na
     int   liveLT = na
-
-    // Internals must be at/before the current extreme (ignore post-extreme bounces)
-    if not na(ph) and dir == -1
-        int pT = time[right]
-        if na(legLoT) or pT <= legLoT
-            intPx := ph
-            intT := pT
-    if not na(pl) and dir == 1
-        int pT2 = time[right]
-        if na(legHiT) or pT2 <= legHiT
-            intPx := pl
-            intT := pT2
-
     bool flipped = false
+    float winHi = ta.highest(high, lb)
+    int   winHiAgo = ta.highestbars(high, lb)
+    float winLo = ta.lowest(low, lb)
+    int   winLoAgo = ta.lowestbars(low, lb)
 
     if dir == 0
         if na(legHi)
@@ -117,76 +113,78 @@ f_dr_event() =>
                 legLoT := time
             if legHi - legLo >= thr
                 dir := legHiT >= legLoT ? -1 : 1
-                intPx := na
-                intT := na
                 legActive := true
+                drOppPx := na
+                drOppT := na
     else if dir == -1
         if high > legHi
+            // Bearish leg invalidated by new HH → flip bullish from prior low
+            dir := 1
             legHi := high
             legHiT := time
-            legLo := low
-            legLoT := time
-            intPx := na
-            intT := na
-            legActive := false
+            drOppPx := winLo
+            drOppT := time[winLoAgo]
+            legActive := not na(legLo) and legHi - legLo >= thr
         else
             if low <= legLo
                 legLo := low
                 legLoT := time
+                drOppPx := winHi
+                drOppT := time[winHiAgo]
             if legHi - legLo >= thr
                 legActive := true
-            // Reverse up by thr → finalize bearish dealing range
-            if legActive and high - legLo >= thr
-                finH := not na(intPx) ? intPx : legHi
-                finHT := not na(intT) ? intT : legHiT
+            if legActive and not na(drOppPx) and high - legLo >= thr
+                finH := drOppPx
+                finHT := drOppT
                 finL := legLo
                 finLT := legLoT
                 dir := 1
                 legHi := high
                 legHiT := time
-                intPx := na
-                intT := na
+                drOppPx := na
+                drOppT := na
                 legActive := true
                 flipped := true
     else if dir == 1
         if low < legLo
+            // Bullish leg invalidated by new LL → flip bearish from prior high
+            // (keeps Fri 02:00/02:15 as DR high into the 10:00 low on 15m)
+            dir := -1
             legLo := low
             legLoT := time
-            legHi := high
-            legHiT := time
-            intPx := na
-            intT := na
-            legActive := false
+            drOppPx := winHi
+            drOppT := time[winHiAgo]
+            legActive := not na(legHi) and legHi - legLo >= thr
         else
             if high >= legHi
                 legHi := high
                 legHiT := time
+                drOppPx := winLo
+                drOppT := time[winLoAgo]
             if legHi - legLo >= thr
                 legActive := true
-            // Reverse down by thr → finalize bullish dealing range
-            if legActive and legHi - low >= thr
-                finL := not na(intPx) ? intPx : legLo
-                finLT := not na(intT) ? intT : legLoT
+            if legActive and not na(drOppPx) and legHi - low >= thr
+                finL := drOppPx
+                finLT := drOppT
                 finH := legHi
                 finHT := legHiT
                 dir := -1
                 legLo := low
                 legLoT := time
-                intPx := na
-                intT := na
+                drOppPx := na
+                drOppT := na
                 legActive := true
                 flipped := true
 
-    // Live in-progress pair (not on the finalize bar)
     if legActive and not flipped
-        if dir == -1
-            liveH := not na(intPx) ? intPx : legHi
-            liveHT := not na(intT) ? intT : legHiT
+        if dir == -1 and not na(drOppPx)
+            liveH := drOppPx
+            liveHT := drOppT
             liveL := legLo
             liveLT := legLoT
-        else if dir == 1
-            liveL := not na(intPx) ? intPx : legLo
-            liveLT := not na(intT) ? intT : legLoT
+        else if dir == 1 and not na(drOppPx)
+            liveL := drOppPx
+            liveLT := drOppT
             liveH := legHi
             liveHT := legHiT
 
@@ -223,7 +221,7 @@ else
     liveLT := h1
 
 // =========================================================
-// History (finalized legs) + live labels
+// Draw history + live
 // =========================================================
 var array<int>   hiTimes  = array.new_int()
 var array<float> hiPrices = array.new_float()
@@ -247,7 +245,6 @@ var float liveHPx = na
 var int   liveHTm = na
 var float liveLPx = na
 var int   liveLTm = na
-
 var line midLn = na
 
 f_del_side(arrM, arrG, arrE, arrT, arrP) =>
@@ -301,7 +298,6 @@ f_add_low(t, p) =>
     array.push(loTags, showTags ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_label_up, size = size.small, text = srcName + ' L', textcolor = lowColor, color = color.new(color.black, 100)) : na)
     array.push(loEmos, showEmoji ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
 
-// --- Finalized historical pairs (many legs) ---
 bool gotFinH = not na(finH) and not na(finHT)
 bool gotFinL = not na(finL) and not na(finLT)
 
@@ -317,7 +313,6 @@ if gotFinL and not f_already(loTimes, loPrices, finLT, finL)
     f_add_low(finLT, finL)
     f_trim(loTimes, loPrices, loMarks, loTags, loEmos)
 
-// --- Live in-progress pair ---
 if showLive
     if not na(liveH) and not na(liveHT)
         if na(liveHTm) or liveHTm != liveHT or na(liveHPx) or liveHPx != liveH
@@ -369,7 +364,6 @@ else
     liveLPx := na
     liveLTm := na
 
-// 50% of latest available pair (prefer live, else last finalized)
 float midH = not na(liveHPx) ? liveHPx : array.size(hiPrices) > 0 ? array.get(hiPrices, array.size(hiPrices) - 1) : na
 float midL = not na(liveLPx) ? liveLPx : array.size(loPrices) > 0 ? array.get(loPrices, array.size(loPrices) - 1) : na
 int   midHT = not na(liveHTm) ? liveHTm : array.size(hiTimes) > 0 ? array.get(hiTimes, array.size(hiTimes) - 1) : na
@@ -384,7 +378,7 @@ if showMid and not na(midH) and not na(midL) and not na(midHT) and not na(midLT)
 
 var table info = table.new(position.top_right, 1, 3, bgcolor = color.new(color.black, 70))
 if barstate.islast
-    table.cell(info, 0, 0, 'Chart: ' + timeframe.period, text_color = color.white, text_size = size.small)
-    table.cell(info, 0, 1, 'Showing: ' + srcName + ' dealing ranges', text_color = color.aqua, text_size = size.small)
+    table.cell(info, 0, 0, 'Chart: ' + timeframe.period + ' → ' + srcName, text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 1, 'DR window: ' + str.tostring(drHours, '#.#') + 'h', text_color = color.aqua, text_size = size.small)
     string lastHL = not na(midH) and not na(midL) ? str.tostring(midH, format.mintick) + ' / ' + str.tostring(midL, format.mintick) : '—'
     table.cell(info, 0, 2, 'Active H/L: ' + lastHL, text_color = color.yellow, text_size = size.small)
