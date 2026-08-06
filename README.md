@@ -1,34 +1,34 @@
 # Orca HTF Fractals
 
-TradingView Pine Script v6 dealing-range highs/lows. **Not date-hardcoded.**
+TradingView Pine Script v6 — **Williams Fractals** (same logic as the built-in Fractals indicator). **Not date-hardcoded.**
 
-## Test anchor (NY time)
+## Test anchors (1H, NY)
 
-| Side | Candle |
-|------|--------|
-| High | Fri 31 Jul 2026 **02:00** area |
-| Low  | Fri 31 Jul 2026 **10:00** |
+| Side | Candle | Fractal |
+|------|--------|---------|
+| High | Wed **5 Aug 2026 03:00** | Up fractal (green/teal ▲) |
+| Low  | Wed **5 Aug 2026 06:00** | Down fractal (red ▼) |
+
+Also valid Williams fractals: Fri 31 Jul 2026 **02:00** high / **10:00** low.
 
 ## Timeframe map
 
 | Chart | Shows |
 |-------|--------|
-| 1H | 1H dealing ranges |
-| 15m | **1H** dealing ranges |
-| 5m | **15m** dealing ranges |
-| 1m | 5m dealing ranges |
-
-So on **5m** you should see a **15m H** near the Fri 02:00/02:15 high (same selloff that 1H marks at 02:00).
+| 1H | 1H fractals |
+| 15m | **1H** fractals |
+| 5m | **15m** fractals |
+| 1m | 5m fractals |
 
 ## Logic
 
-1. Major ZigZag leg (`Major leg × ATR`)
-2. Opposite DR side = highest high / lowest low in the last `DR window (hours)` from the leg extreme (default 8h) — so 15m does not stick a tiny 09:15 LH over 02:15
-3. If a bullish leg is invalidated by a new LL, flip bearish and keep the prior high (keeps 02:15 → 10:00 on 15m)
-4. Completed legs are stored in history; live leg updates too
+1. `ta.pivothigh` / `ta.pivotlow` with Left/Right periods (default **2/2**, same as TradingView Fractals)
+2. Up fractal = local high → teal ▲ above the candle
+3. Down fractal = local low → red ▼ below the candle
+4. Confirmed `right` bars after the pivot (no lookahead)
 
 ## Settings
 
-- **Show ONLY latest…** = off (to see history)
-- **DR window (hours)** = 8
-- **Major leg (× ATR)** = 3 (lower = more marks)
+- **Fractal Left / Right** = 2 / 2
+- **Min swing (× ATR)** = **0** (mark every fractal like the Fractals indicator; raise to hide tiny swings)
+- **Keep last N** = 50 (or 0 = all)

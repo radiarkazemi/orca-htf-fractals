@@ -2,34 +2,32 @@
 indicator('Orca HTF Fractals', overlay = true, max_labels_count = 500, max_lines_count = 100)
 
 // =========================================================
-// Dealing-range H/L  (NOT date-hardcoded)
+// Williams Fractals (same idea as TradingView "Fractals")
 //
-// Test anchor (FxPro XAUUSD, NY):
-//   Fri 31 Jul 2026 02:00 area high  +  10:00 low
+// Up fractal   = pivot HIGH  → green/teal ▲ above the candle
+// Down fractal = pivot LOW   → red ▼ below the candle
 //
-// Why 5m was missing 02:00 while 1H/15m looked fine:
-//   15m chart shows 1H signals → 02:00 (1H candle) ✓
-//   5m chart shows 15m signals → old logic used LAST 15m
-//   fractal LH before the low (09:15), overwriting 02:15.
+// Test anchors (1H, NY) — not hardcoded:
+//   Wed 5 Aug 2026 03:00  fractal HIGH
+//   Wed 5 Aug 2026 06:00  fractal LOW
 //
-// Fix:
-//   Major ZigZag finds the leg. DR endpoints =
-//     bearish: lowest low of leg + HIGHEST HIGH in the last
-//              `drHours` before that low (→ 02:00/02:15)
-//     bullish: mirror with lowest low in the window
-//
-// Map: 1H→1H | 15m→1H | 5m→15m | 1m→5m
+// Map:
+//   1H  → 1H fractals
+//   15m → 1H fractals
+//   5m  → 15m fractals
+//   1m  → 5m fractals
 // =========================================================
 
-zzAtr   = input.float(3.0, 'Major leg (× ATR)', minval = 0.5, step = 0.5, group = 'Filter')
-atrLen  = input.int(14, 'ATR Length', minval = 1, group = 'Filter')
-drHours = input.float(8.0, 'DR window (hours)', minval = 1.0, step = 0.5, group = 'Filter', tooltip = 'Look back this many hours from the leg extreme to place the opposite DR side. 8h keeps Fri 02:00 with the 10:00 low on 15m.')
-keepLastN = input.int(12, 'Keep last N highs + N lows (0 = all)', minval = 0, group = 'Filter')
-onlyLatestPair = input.bool(false, 'Show ONLY latest High + latest Low', group = 'Filter')
-showLive = input.bool(true, 'Show live (in-progress) dealing range', group = 'Filter')
+left  = input.int(2, 'Fractal Left',  minval = 1, group = 'Fractal', tooltip = 'TradingView Fractals default = 2')
+right = input.int(2, 'Fractal Right', minval = 1, group = 'Fractal', tooltip = 'TradingView Fractals default = 2')
 
-highColor   = input.color(color.red,  'High Color', group = 'Style')
-lowColor    = input.color(color.lime, 'Low Color',  group = 'Style')
+minSwingAtr = input.float(0.0, 'Min swing (× ATR)', minval = 0.0, step = 0.1, group = 'Filter', tooltip = '0 = mark every fractal (same as Fractals indicator). Raise to hide tiny swings.')
+atrLen      = input.int(14, 'ATR Length', minval = 1, group = 'Filter')
+keepLastN   = input.int(50, 'Keep last N highs + N lows (0 = all)', minval = 0, group = 'Filter')
+
+// Match TradingView Fractals arrow colors by default
+highColor   = input.color(#26A69A, 'Up fractal (High)', group = 'Style')
+lowColor    = input.color(#EF5350, 'Down fractal (Low)', group = 'Style')
 markSizeStr = input.string('Normal', 'Marker Size', options = ['Tiny','Small','Normal','Large','Huge'], group = 'Style')
 showTags    = input.bool(true, 'Show H/L tags', group = 'Style')
 showEmoji   = input.bool(true, 'Show 😊 on markers', group = 'Style')
@@ -59,175 +57,62 @@ srcTf = f_source_tf()
 srcName = srcTf == '5' ? '5m' : srcTf == '15' ? '15m' : srcTf == '60' ? '1H' : srcTf == '240' ? '4H' : srcTf
 useLocal = timeframe.period == srcTf
 
-// Bars covering drHours on the evaluated series (local or security HTF).
-// +1 so that from 10:00, an 8h window still includes the 02:00 bar.
-f_dr_bars() =>
-    int sec = timeframe.in_seconds()
-    int bars = sec > 0 ? int(math.floor(drHours * 3600.0 / sec)) + 1 : 1
-    math.max(2, bars)
-
 // =========================================================
-// fin* = finalized when a major leg reverses
-// live* = in-progress dealing range
+// Fractal engine (ta.pivothigh / ta.pivotlow = Williams)
+// Confirms `right` bars after the pivot candle.
 // =========================================================
-f_dr_event() =>
+f_fractal_event() =>
+    float ph = ta.pivothigh(high, left, right)
+    float pl = ta.pivotlow(low, left, right)
     float atr = ta.atr(atrLen)
-    float thr = zzAtr * atr
-    int   lb = f_dr_bars()
+    float minDist = minSwingAtr * atr
 
-    var int   dir = 0
-    var float legHi = na
-    var int   legHiT = na
-    var float legLo = na
-    var int   legLoT = na
-    var bool  legActive = false
-    var float drOppPx = na
-    var int   drOppT = na
+    var float prevH = na
+    var float prevL = na
 
-    float finH = na
-    int   finHT = na
-    float finL = na
-    int   finLT = na
-    float liveH = na
-    int   liveHT = na
-    float liveL = na
-    int   liveLT = na
-    bool flipped = false
-    float winHi = ta.highest(high, lb)
-    float winLo = ta.lowest(low, lb)
-    // ta.highestbars / lowestbars return NEGATIVE offsets (e.g. -7).
-    // The [] operator needs a non-negative bars-ago index.
-    int winHiAgo = ta.highestbars(high, lb)
-    int winLoAgo = ta.lowestbars(low, lb)
-    int winHiBack = na(winHiAgo) ? 0 : math.min(lb - 1, int(math.abs(winHiAgo)))
-    int winLoBack = na(winLoAgo) ? 0 : math.min(lb - 1, int(math.abs(winLoAgo)))
-    int winHiT = time[winHiBack]
-    int winLoT = time[winLoBack]
+    float hPrice = na
+    int   hTime  = na
+    float lPrice = na
+    int   lTime  = na
 
-    if dir == 0
-        if na(legHi)
-            legHi := high
-            legHiT := time
-            legLo := low
-            legLoT := time
-        else
-            if high >= legHi
-                legHi := high
-                legHiT := time
-            if low <= legLo
-                legLo := low
-                legLoT := time
-            if legHi - legLo >= thr
-                dir := legHiT >= legLoT ? -1 : 1
-                legActive := true
-                drOppPx := na
-                drOppT := na
-    else if dir == -1
-        if high > legHi
-            // Bearish leg invalidated by new HH → flip bullish from prior low
-            dir := 1
-            legHi := high
-            legHiT := time
-            drOppPx := winLo
-            drOppT := winLoT
-            legActive := not na(legLo) and legHi - legLo >= thr
-        else
-            if low <= legLo
-                legLo := low
-                legLoT := time
-                drOppPx := winHi
-                drOppT := winHiT
-            if legHi - legLo >= thr
-                legActive := true
-            if legActive and not na(drOppPx) and high - legLo >= thr
-                finH := drOppPx
-                finHT := drOppT
-                finL := legLo
-                finLT := legLoT
-                dir := 1
-                legHi := high
-                legHiT := time
-                drOppPx := na
-                drOppT := na
-                legActive := true
-                flipped := true
-    else if dir == 1
-        if low < legLo
-            // Bullish leg invalidated by new LL → flip bearish from prior high
-            // (keeps Fri 02:00/02:15 as DR high into the 10:00 low on 15m)
-            dir := -1
-            legLo := low
-            legLoT := time
-            drOppPx := winHi
-            drOppT := winHiT
-            legActive := not na(legHi) and legHi - legLo >= thr
-        else
-            if high >= legHi
-                legHi := high
-                legHiT := time
-                drOppPx := winLo
-                drOppT := winLoT
-            if legHi - legLo >= thr
-                legActive := true
-            if legActive and not na(drOppPx) and legHi - low >= thr
-                finL := drOppPx
-                finLT := drOppT
-                finH := legHi
-                finHT := legHiT
-                dir := -1
-                legLo := low
-                legLoT := time
-                drOppPx := na
-                drOppT := na
-                legActive := true
-                flipped := true
+    if not na(ph)
+        bool farEnough = minSwingAtr == 0 or na(prevL) or math.abs(ph - prevL) >= minDist
+        bool notDup = na(prevH) or math.abs(ph - prevH) >= syminfo.mintick
+        if farEnough and notDup
+            hPrice := ph
+            hTime  := time[right]
+            prevH := ph
 
-    if legActive and not flipped
-        if dir == -1 and not na(drOppPx)
-            liveH := drOppPx
-            liveHT := drOppT
-            liveL := legLo
-            liveLT := legLoT
-        else if dir == 1 and not na(drOppPx)
-            liveL := drOppPx
-            liveLT := drOppT
-            liveH := legHi
-            liveHT := legHiT
+    if not na(pl)
+        bool farEnough = minSwingAtr == 0 or na(prevH) or math.abs(pl - prevH) >= minDist
+        bool notDup = na(prevL) or math.abs(pl - prevL) >= syminfo.mintick
+        if farEnough and notDup
+            lPrice := pl
+            lTime  := time[right]
+            prevL := pl
 
-    [finH, finHT, finL, finLT, liveH, liveHT, liveL, liveLT]
+    [hPrice, hTime, lPrice, lTime]
 
-float finH = na
-int   finHT = na
-float finL = na
-int   finLT = na
-float liveH = na
-int   liveHT = na
-float liveL = na
-int   liveLT = na
+float evHPrice = na
+int   evHTime  = na
+float evLPrice = na
+int   evLTime  = na
 
 if useLocal
-    [a0, b0, c0, d0, e0, f0, g0, h0] = f_dr_event()
-    finH := a0
-    finHT := b0
-    finL := c0
-    finLT := d0
-    liveH := e0
-    liveHT := f0
-    liveL := g0
-    liveLT := h0
+    [h0, ht0, l0, lt0] = f_fractal_event()
+    evHPrice := h0
+    evHTime  := ht0
+    evLPrice := l0
+    evLTime  := lt0
 else
-    [a1, b1, c1, d1, e1, f1, g1, h1] = request.security(syminfo.tickerid, srcTf, f_dr_event(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
-    finH := a1
-    finHT := b1
-    finL := c1
-    finLT := d1
-    liveH := e1
-    liveHT := f1
-    liveL := g1
-    liveLT := h1
+    [h1, ht1, l1, lt1] = request.security(syminfo.tickerid, srcTf, f_fractal_event(), gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off)
+    evHPrice := h1
+    evHTime  := ht1
+    evLPrice := l1
+    evLTime  := lt1
 
 // =========================================================
-// Draw history + live
+// Draw every confirmed fractal (history kept)
 // =========================================================
 var array<int>   hiTimes  = array.new_int()
 var array<float> hiPrices = array.new_float()
@@ -241,29 +126,7 @@ var array<label> loMarks  = array.new_label()
 var array<label> loTags   = array.new_label()
 var array<label> loEmos   = array.new_label()
 
-var label liveHMark = na
-var label liveHTag = na
-var label liveHEmo = na
-var label liveLMark = na
-var label liveLTag = na
-var label liveLEmo = na
-var float liveHPx = na
-var int   liveHTm = na
-var float liveLPx = na
-var int   liveLTm = na
 var line midLn = na
-
-f_del_side(arrM, arrG, arrE, arrT, arrP) =>
-    if array.size(arrM) > 0
-        label.delete(array.pop(arrM))
-        label oldG = array.pop(arrG)
-        if not na(oldG)
-            label.delete(oldG)
-        label oldE = array.pop(arrE)
-        if not na(oldE)
-            label.delete(oldE)
-        array.pop(arrT)
-        array.pop(arrP)
 
 f_trim(arrT, arrP, arrM, arrG, arrE) =>
     if keepLastN > 0
@@ -290,101 +153,41 @@ f_already(arrT, arrP, t, p) =>
                 break
     found
 
-f_add_high(t, p) =>
-    array.push(hiTimes, t)
-    array.push(hiPrices, p)
-    array.push(hiMarks, label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_triangledown, size = markSize, text = '', color = highColor))
-    array.push(hiTags, showTags ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_label_down, size = size.small, text = srcName + ' H', textcolor = highColor, color = color.new(color.black, 100)) : na)
-    array.push(hiEmos, showEmoji ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
+bool newHigh = not na(evHPrice) and not na(evHTime)
+bool newLow  = not na(evLPrice) and not na(evLTime)
 
-f_add_low(t, p) =>
-    array.push(loTimes, t)
-    array.push(loPrices, p)
-    array.push(loMarks, label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_triangleup, size = markSize, text = '', color = lowColor))
-    array.push(loTags, showTags ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_label_up, size = size.small, text = srcName + ' L', textcolor = lowColor, color = color.new(color.black, 100)) : na)
-    array.push(loEmos, showEmoji ? label.new(x = t, y = p, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
-
-bool gotFinH = not na(finH) and not na(finHT)
-bool gotFinL = not na(finL) and not na(finLT)
-
-if gotFinH and not f_already(hiTimes, hiPrices, finHT, finH)
-    if onlyLatestPair
-        f_del_side(hiMarks, hiTags, hiEmos, hiTimes, hiPrices)
-    f_add_high(finHT, finH)
+// Up fractal = HIGH → ▲ above (TradingView Fractals green/teal)
+if newHigh and not f_already(hiTimes, hiPrices, evHTime, evHPrice)
+    array.push(hiTimes, evHTime)
+    array.push(hiPrices, evHPrice)
+    array.push(hiMarks, label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_triangleup, size = markSize, text = '', color = highColor))
+    array.push(hiTags, showTags ? label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_label_down, size = size.small, text = srcName + ' H', textcolor = highColor, color = color.new(color.black, 100)) : na)
+    array.push(hiEmos, showEmoji ? label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
     f_trim(hiTimes, hiPrices, hiMarks, hiTags, hiEmos)
 
-if gotFinL and not f_already(loTimes, loPrices, finLT, finL)
-    if onlyLatestPair
-        f_del_side(loMarks, loTags, loEmos, loTimes, loPrices)
-    f_add_low(finLT, finL)
+// Down fractal = LOW → ▼ below (TradingView Fractals red)
+if newLow and not f_already(loTimes, loPrices, evLTime, evLPrice)
+    array.push(loTimes, evLTime)
+    array.push(loPrices, evLPrice)
+    array.push(loMarks, label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_triangledown, size = markSize, text = '', color = lowColor))
+    array.push(loTags, showTags ? label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_label_up, size = size.small, text = srcName + ' L', textcolor = lowColor, color = color.new(color.black, 100)) : na)
+    array.push(loEmos, showEmoji ? label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
     f_trim(loTimes, loPrices, loMarks, loTags, loEmos)
 
-if showLive
-    if not na(liveH) and not na(liveHT)
-        if na(liveHTm) or liveHTm != liveHT or na(liveHPx) or liveHPx != liveH
-            if not na(liveHMark)
-                label.delete(liveHMark)
-            if not na(liveHTag)
-                label.delete(liveHTag)
-            if not na(liveHEmo)
-                label.delete(liveHEmo)
-            liveHMark := label.new(x = liveHT, y = liveH, xloc = xloc.bar_time, style = label.style_triangledown, size = markSize, text = '', color = highColor)
-            liveHTag := showTags ? label.new(x = liveHT, y = liveH, xloc = xloc.bar_time, style = label.style_label_down, size = size.small, text = srcName + ' H', textcolor = highColor, color = color.new(color.black, 100)) : na
-            liveHEmo := showEmoji ? label.new(x = liveHT, y = liveH, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na
-            liveHPx := liveH
-            liveHTm := liveHT
-    if not na(liveL) and not na(liveLT)
-        if na(liveLTm) or liveLTm != liveLT or na(liveLPx) or liveLPx != liveL
-            if not na(liveLMark)
-                label.delete(liveLMark)
-            if not na(liveLTag)
-                label.delete(liveLTag)
-            if not na(liveLEmo)
-                label.delete(liveLEmo)
-            liveLMark := label.new(x = liveLT, y = liveL, xloc = xloc.bar_time, style = label.style_triangleup, size = markSize, text = '', color = lowColor)
-            liveLTag := showTags ? label.new(x = liveLT, y = liveL, xloc = xloc.bar_time, style = label.style_label_up, size = size.small, text = srcName + ' L', textcolor = lowColor, color = color.new(color.black, 100)) : na
-            liveLEmo := showEmoji ? label.new(x = liveLT, y = liveL, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na
-            liveLPx := liveL
-            liveLTm := liveLT
-else
-    if not na(liveHMark)
-        label.delete(liveHMark)
-    if not na(liveHTag)
-        label.delete(liveHTag)
-    if not na(liveHEmo)
-        label.delete(liveHEmo)
-    if not na(liveLMark)
-        label.delete(liveLMark)
-    if not na(liveLTag)
-        label.delete(liveLTag)
-    if not na(liveLEmo)
-        label.delete(liveLEmo)
-    liveHMark := na
-    liveHTag := na
-    liveHEmo := na
-    liveLMark := na
-    liveLTag := na
-    liveLEmo := na
-    liveHPx := na
-    liveHTm := na
-    liveLPx := na
-    liveLTm := na
-
-float midH = not na(liveHPx) ? liveHPx : array.size(hiPrices) > 0 ? array.get(hiPrices, array.size(hiPrices) - 1) : na
-float midL = not na(liveLPx) ? liveLPx : array.size(loPrices) > 0 ? array.get(loPrices, array.size(loPrices) - 1) : na
-int   midHT = not na(liveHTm) ? liveHTm : array.size(hiTimes) > 0 ? array.get(hiTimes, array.size(hiTimes) - 1) : na
-int   midLT = not na(liveLTm) ? liveLTm : array.size(loTimes) > 0 ? array.get(loTimes, array.size(loTimes) - 1) : na
-
-if showMid and not na(midH) and not na(midL) and not na(midHT) and not na(midLT)
-    if gotFinH or gotFinL or (showLive and (not na(liveH) or not na(liveL)))
+if showMid and array.size(hiPrices) > 0 and array.size(loPrices) > 0
+    if newHigh or newLow
         if not na(midLn)
             line.delete(midLn)
-        float mid = (midH + midL) / 2.0
-        midLn := line.new(math.min(midHT, midLT), mid, math.max(midHT, midLT), mid, xloc = xloc.bar_time, extend = extend.right, color = midColor, width = 2, style = line.style_dotted)
+        float lh = array.get(hiPrices, array.size(hiPrices) - 1)
+        float ll = array.get(loPrices, array.size(loPrices) - 1)
+        int   th = array.get(hiTimes, array.size(hiTimes) - 1)
+        int   tl = array.get(loTimes, array.size(loTimes) - 1)
+        float mid = (lh + ll) / 2.0
+        midLn := line.new(math.min(th, tl), mid, math.max(th, tl), mid, xloc = xloc.bar_time, extend = extend.right, color = midColor, width = 2, style = line.style_dotted)
 
 var table info = table.new(position.top_right, 1, 3, bgcolor = color.new(color.black, 70))
 if barstate.islast
     table.cell(info, 0, 0, 'Chart: ' + timeframe.period + ' → ' + srcName, text_color = color.white, text_size = size.small)
-    table.cell(info, 0, 1, 'DR window: ' + str.tostring(drHours, '#.#') + 'h', text_color = color.aqua, text_size = size.small)
-    string lastHL = not na(midH) and not na(midL) ? str.tostring(midH, format.mintick) + ' / ' + str.tostring(midL, format.mintick) : '—'
-    table.cell(info, 0, 2, 'Active H/L: ' + lastHL, text_color = color.yellow, text_size = size.small)
+    table.cell(info, 0, 1, 'Williams Fractals L/R=' + str.tostring(left) + '/' + str.tostring(right), text_color = color.aqua, text_size = size.small)
+    string lastHL = array.size(hiPrices) > 0 and array.size(loPrices) > 0 ? str.tostring(array.get(hiPrices, array.size(hiPrices) - 1), format.mintick) + ' / ' + str.tostring(array.get(loPrices, array.size(loPrices) - 1), format.mintick) : '—'
+    table.cell(info, 0, 2, 'Latest H/L: ' + lastHL, text_color = color.yellow, text_size = size.small)
