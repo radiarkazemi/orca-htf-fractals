@@ -9,7 +9,8 @@ TradingView Pine Script v6 — **Williams Fractals** (Periods = **3**). **Not da
 
 ## 50% lines (settings group)
 
-Toggle each TF mid independently, each with its own color. Example on **1m**: show 1H + 15m + 5m + 1m 50% lines together.
+Toggle each TF mid independently (own color + **TF label**).  
+Line is a short horizontal segment: **last bar → last bar + N** (default N=6). **No extend** (fixes vertical glitch).
 
 | Setting | Default color |
 |---------|---------------|
