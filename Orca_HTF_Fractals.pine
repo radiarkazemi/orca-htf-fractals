@@ -2,13 +2,12 @@
 indicator('Orca HTF Fractals', overlay = true, max_labels_count = 500, max_lines_count = 100)
 
 // =========================================================
-// Williams Fractals (same as TradingView "Fractals")
+// Williams Fractals (TradingView Fractals, Periods = N)
 //
-// Periods = N  →  N bars left + N bars right (TV default UI)
-// Your Fractals chart uses Periods = 3  (not 2).
-//
-// Up fractal   = pivot HIGH  → teal ▲
-// Down fractal = pivot LOW   → red ▼
+// Markers = circles (no H/L text tags)
+// Color by bias:
+//   Uptrend  (HH / HL) → all circles green
+//   Downtrend (LH / LL) → all circles red
 //
 // Test anchors (1H, NY) — not hardcoded:
 //   Fri 31 Jul 2026 02:00 H / 10:00 L
@@ -17,19 +16,18 @@ indicator('Orca HTF Fractals', overlay = true, max_labels_count = 500, max_lines
 // Map: 1H→1H | 15m→1H | 5m→15m | 1m→5m
 // =========================================================
 
-periods = input.int(3, 'Periods', minval = 2, group = 'Fractal', tooltip = 'Same as TradingView Fractals → Periods. 3 = less noise than 2.')
+periods = input.int(3, 'Periods', minval = 2, group = 'Fractal', tooltip = 'Same as TradingView Fractals → Periods.')
 left  = periods
 right = periods
 
-minSwingAtr = input.float(0.0, 'Min swing (× ATR)', minval = 0.0, step = 0.1, group = 'Filter', tooltip = '0 = every fractal. Raise only if you still want fewer marks.')
+minSwingAtr = input.float(0.0, 'Min swing (× ATR)', minval = 0.0, step = 0.1, group = 'Filter')
 atrLen      = input.int(14, 'ATR Length', minval = 1, group = 'Filter')
 keepLastN   = input.int(50, 'Keep last N highs + N lows (0 = all)', minval = 0, group = 'Filter')
 
-// Match TradingView Fractals arrow colors by default
-highColor   = input.color(#26A69A, 'Up fractal (High)', group = 'Style')
-lowColor    = input.color(#EF5350, 'Down fractal (Low)', group = 'Style')
+upColor     = input.color(#26A69A, 'Uptrend color', group = 'Style')
+downColor   = input.color(#EF5350, 'Downtrend color', group = 'Style')
+flatColor   = input.color(color.gray, 'No-bias color', group = 'Style')
 markSizeStr = input.string('Normal', 'Marker Size', options = ['Tiny','Small','Normal','Large','Huge'], group = 'Style')
-showTags    = input.bool(true, 'Show H/L tags', group = 'Style')
 showEmoji   = input.bool(true, 'Show 😊 on markers', group = 'Style')
 showMid     = input.bool(true, 'Show 50% of latest H/L', group = 'Style')
 midColor    = input.color(color.orange, '50% color', group = 'Style')
@@ -58,8 +56,8 @@ srcName = srcTf == '5' ? '5m' : srcTf == '15' ? '15m' : srcTf == '60' ? '1H' : s
 useLocal = timeframe.period == srcTf
 
 // =========================================================
-// Fractal engine (ta.pivothigh / ta.pivotlow = Williams)
-// Confirms `right` bars after the pivot candle.
+// Fractal engine + bias (HH/HL = up, LH/LL = down)
+// Returns prices/times and bias AFTER applying this bar's pivots.
 // =========================================================
 f_fractal_event() =>
     float ph = ta.pivothigh(high, left, right)
@@ -69,6 +67,7 @@ f_fractal_event() =>
 
     var float prevH = na
     var float prevL = na
+    var int   bias = 0
 
     float hPrice = na
     int   hTime  = na
@@ -79,6 +78,8 @@ f_fractal_event() =>
         bool farEnough = minSwingAtr == 0 or na(prevL) or math.abs(ph - prevL) >= minDist
         bool notDup = na(prevH) or math.abs(ph - prevH) >= syminfo.mintick
         if farEnough and notDup
+            if not na(prevH)
+                bias := ph > prevH ? 1 : ph < prevH ? -1 : bias
             hPrice := ph
             hTime  := time[right]
             prevH := ph
@@ -87,56 +88,60 @@ f_fractal_event() =>
         bool farEnough = minSwingAtr == 0 or na(prevH) or math.abs(pl - prevH) >= minDist
         bool notDup = na(prevL) or math.abs(pl - prevL) >= syminfo.mintick
         if farEnough and notDup
+            if not na(prevL)
+                bias := pl > prevL ? 1 : pl < prevL ? -1 : bias
             lPrice := pl
             lTime  := time[right]
             prevL := pl
 
-    [hPrice, hTime, lPrice, lTime]
+    [hPrice, hTime, lPrice, lTime, bias]
 
 float evHPrice = na
 int   evHTime  = na
 float evLPrice = na
 int   evLTime  = na
+int   evBias   = 0
 
 if useLocal
-    [h0, ht0, l0, lt0] = f_fractal_event()
+    [h0, ht0, l0, lt0, b0] = f_fractal_event()
     evHPrice := h0
     evHTime  := ht0
     evLPrice := l0
     evLTime  := lt0
+    evBias   := b0
 else
-    [h1, ht1, l1, lt1] = request.security(syminfo.tickerid, srcTf, f_fractal_event(), gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off)
+    [h1, ht1, l1, lt1, b1] = request.security(syminfo.tickerid, srcTf, f_fractal_event(), gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off)
     evHPrice := h1
     evHTime  := ht1
     evLPrice := l1
     evLTime  := lt1
+    evBias   := nz(b1, 0)
+
+f_bias_color(b) =>
+    b > 0 ? upColor : b < 0 ? downColor : flatColor
 
 // =========================================================
-// Draw every confirmed fractal (history kept)
+// Draw circles (no timeframe H/L text)
 // =========================================================
 var array<int>   hiTimes  = array.new_int()
 var array<float> hiPrices = array.new_float()
 var array<label> hiMarks  = array.new_label()
-var array<label> hiTags   = array.new_label()
 var array<label> hiEmos   = array.new_label()
 
 var array<int>   loTimes  = array.new_int()
 var array<float> loPrices = array.new_float()
 var array<label> loMarks  = array.new_label()
-var array<label> loTags   = array.new_label()
 var array<label> loEmos   = array.new_label()
 
 var line midLn = na
+var int  lastBias = 0
 
-f_trim(arrT, arrP, arrM, arrG, arrE) =>
+f_trim(arrT, arrP, arrM, arrE) =>
     if keepLastN > 0
         for i = 0 to 200
             if array.size(arrT) <= keepLastN
                 break
             label.delete(array.shift(arrM))
-            label oldG = array.shift(arrG)
-            if not na(oldG)
-                label.delete(oldG)
             label oldE = array.shift(arrE)
             if not na(oldE)
                 label.delete(oldE)
@@ -156,23 +161,24 @@ f_already(arrT, arrP, t, p) =>
 bool newHigh = not na(evHPrice) and not na(evHTime)
 bool newLow  = not na(evLPrice) and not na(evLTime)
 
-// Up fractal = HIGH → ▲ above (TradingView Fractals green/teal)
+if newHigh or newLow
+    lastBias := evBias
+
+color markCol = f_bias_color(evBias)
+
 if newHigh and not f_already(hiTimes, hiPrices, evHTime, evHPrice)
     array.push(hiTimes, evHTime)
     array.push(hiPrices, evHPrice)
-    array.push(hiMarks, label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_triangleup, size = markSize, text = '', color = highColor))
-    array.push(hiTags, showTags ? label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_label_down, size = size.small, text = srcName + ' H', textcolor = highColor, color = color.new(color.black, 100)) : na)
+    array.push(hiMarks, label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_circle, size = markSize, text = '', color = markCol))
     array.push(hiEmos, showEmoji ? label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
-    f_trim(hiTimes, hiPrices, hiMarks, hiTags, hiEmos)
+    f_trim(hiTimes, hiPrices, hiMarks, hiEmos)
 
-// Down fractal = LOW → ▼ below (TradingView Fractals red)
 if newLow and not f_already(loTimes, loPrices, evLTime, evLPrice)
     array.push(loTimes, evLTime)
     array.push(loPrices, evLPrice)
-    array.push(loMarks, label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_triangledown, size = markSize, text = '', color = lowColor))
-    array.push(loTags, showTags ? label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_label_up, size = size.small, text = srcName + ' L', textcolor = lowColor, color = color.new(color.black, 100)) : na)
+    array.push(loMarks, label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_circle, size = markSize, text = '', color = markCol))
     array.push(loEmos, showEmoji ? label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
-    f_trim(loTimes, loPrices, loMarks, loTags, loEmos)
+    f_trim(loTimes, loPrices, loMarks, loEmos)
 
 if showMid and array.size(hiPrices) > 0 and array.size(loPrices) > 0
     if newHigh or newLow
@@ -187,7 +193,8 @@ if showMid and array.size(hiPrices) > 0 and array.size(loPrices) > 0
 
 var table info = table.new(position.top_right, 1, 3, bgcolor = color.new(color.black, 70))
 if barstate.islast
+    string biasTxt = lastBias > 0 ? 'Uptrend' : lastBias < 0 ? 'Downtrend' : 'Flat'
+    color  biasCol = f_bias_color(lastBias)
     table.cell(info, 0, 0, 'Chart: ' + timeframe.period + ' → ' + srcName, text_color = color.white, text_size = size.small)
     table.cell(info, 0, 1, 'Fractals Periods=' + str.tostring(periods), text_color = color.aqua, text_size = size.small)
-    string lastHL = array.size(hiPrices) > 0 and array.size(loPrices) > 0 ? str.tostring(array.get(hiPrices, array.size(hiPrices) - 1), format.mintick) + ' / ' + str.tostring(array.get(loPrices, array.size(loPrices) - 1), format.mintick) : '—'
-    table.cell(info, 0, 2, 'Latest H/L: ' + lastHL, text_color = color.yellow, text_size = size.small)
+    table.cell(info, 0, 2, 'Bias: ' + biasTxt, text_color = biasCol, text_size = size.small)

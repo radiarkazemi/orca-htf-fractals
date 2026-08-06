@@ -1,10 +1,13 @@
 # Orca HTF Fractals
 
-TradingView Pine Script v6 — **Williams Fractals** (same as built-in Fractals). **Not date-hardcoded.**
+TradingView Pine Script v6 — **Williams Fractals** (Periods = **3**). **Not date-hardcoded.**
 
-## Periods
+## Markers
 
-Use **Periods = 3** (matches your Fractals chart). Periods=2 is noisier.
+- Shape: **circle** (no `1H H` / `5m L` text)
+- Color by **bias**:
+  - **Uptrend** (higher high / higher low) → green
+  - **Downtrend** (lower high / lower low) → red
 
 ## Test anchors (1H, NY)
 
@@ -23,7 +26,3 @@ Use **Periods = 3** (matches your Fractals chart). Periods=2 is noisier.
 | 15m | **1H** fractals |
 | 5m | **15m** fractals |
 | 1m | 5m fractals |
-
-## Logic
-
-`ta.pivothigh` / `ta.pivotlow` with Left = Right = **Periods** (default 3).
