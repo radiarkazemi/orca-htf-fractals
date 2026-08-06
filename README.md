@@ -1,15 +1,19 @@
 # Orca HTF Fractals
 
-TradingView Pine Script v6 — **Williams Fractals** (same logic as the built-in Fractals indicator). **Not date-hardcoded.**
+TradingView Pine Script v6 — **Williams Fractals** (same as built-in Fractals). **Not date-hardcoded.**
+
+## Periods
+
+Use **Periods = 3** (matches your Fractals chart). Periods=2 is noisier.
 
 ## Test anchors (1H, NY)
 
-| Side | Candle | Fractal |
-|------|--------|---------|
-| High | Wed **5 Aug 2026 03:00** | Up fractal (green/teal ▲) |
-| Low  | Wed **5 Aug 2026 06:00** | Down fractal (red ▼) |
-
-Also valid Williams fractals: Fri 31 Jul 2026 **02:00** high / **10:00** low.
+| Side | Candle |
+|------|--------|
+| High | Fri **31 Jul 2026 02:00** |
+| Low  | Fri **31 Jul 2026 10:00** |
+| High | Wed **5 Aug 2026 03:00** |
+| Low  | Wed **5 Aug 2026 06:00** |
 
 ## Timeframe map
 
@@ -22,13 +26,4 @@ Also valid Williams fractals: Fri 31 Jul 2026 **02:00** high / **10:00** low.
 
 ## Logic
 
-1. `ta.pivothigh` / `ta.pivotlow` with Left/Right periods (default **2/2**, same as TradingView Fractals)
-2. Up fractal = local high → teal ▲ above the candle
-3. Down fractal = local low → red ▼ below the candle
-4. Confirmed `right` bars after the pivot (no lookahead)
-
-## Settings
-
-- **Fractal Left / Right** = 2 / 2
-- **Min swing (× ATR)** = **0** (mark every fractal like the Fractals indicator; raise to hide tiny swings)
-- **Keep last N** = 50 (or 0 = all)
+`ta.pivothigh` / `ta.pivotlow` with Left = Right = **Periods** (default 3).
