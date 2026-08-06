@@ -1,19 +1,17 @@
 //@version=6
-indicator('Orca HTF Fractals', overlay = true, max_labels_count = 500, max_lines_count = 100)
+indicator('Orca HTF Fractals', overlay = true, max_labels_count = 500, max_lines_count = 50)
 
 // =========================================================
 // Williams Fractals (TradingView Fractals, Periods = N)
 //
-// Markers = circles (no H/L text tags)
-// Color by bias:
-//   Uptrend  (HH / HL) → all circles green
-//   Downtrend (LH / LL) → all circles red
+// Markers = circles (no H/L text), color by bias:
+//   Uptrend  (HH / HL) → green
+//   Downtrend (LH / LL) → red
 //
-// Test anchors (1H, NY) — not hardcoded:
-//   Fri 31 Jul 2026 02:00 H / 10:00 L
-//   Wed  5 Aug 2026 03:00 H / 06:00 L
+// 50% lines: toggle each TF separately (1H / 15m / 5m / 1m)
+// with its own color — e.g. on 1m see all four mids at once.
 //
-// Map: 1H→1H | 15m→1H | 5m→15m | 1m→5m
+// Map (markers): 1H→1H | 15m→1H | 5m→15m | 1m→5m
 // =========================================================
 
 periods = input.int(3, 'Periods', minval = 2, group = 'Fractal', tooltip = 'Same as TradingView Fractals → Periods.')
@@ -28,9 +26,17 @@ upColor     = input.color(#26A69A, 'Uptrend color', group = 'Style')
 downColor   = input.color(#EF5350, 'Downtrend color', group = 'Style')
 flatColor   = input.color(color.gray, 'No-bias color', group = 'Style')
 markSizeStr = input.string('Normal', 'Marker Size', options = ['Tiny','Small','Normal','Large','Huge'], group = 'Style')
-showEmoji   = input.bool(true, 'Show 😊 on markers', group = 'Style')
-showMid     = input.bool(true, 'Show 50% of latest H/L', group = 'Style')
-midColor    = input.color(color.orange, '50% color', group = 'Style')
+
+grpMid = '50% Lines'
+showMid1h = input.bool(true, 'Show 1H 50%', group = grpMid)
+colMid1h  = input.color(#FF9800, '1H 50% color', group = grpMid)
+showMid15 = input.bool(true, 'Show 15m 50%', group = grpMid)
+colMid15  = input.color(#00BCD4, '15m 50% color', group = grpMid)
+showMid5  = input.bool(true, 'Show 5m 50%', group = grpMid)
+colMid5   = input.color(#FFEB3B, '5m 50% color', group = grpMid)
+showMid1  = input.bool(true, 'Show 1m 50%', group = grpMid)
+colMid1   = input.color(#E040FB, '1m 50% color', group = grpMid)
+midWidth  = input.int(2, '50% line width', minval = 1, maxval = 4, group = grpMid)
 
 markSize = markSizeStr == 'Tiny' ? size.tiny : markSizeStr == 'Small' ? size.small : markSizeStr == 'Normal' ? size.normal : markSizeStr == 'Large' ? size.large : size.huge
 
@@ -56,10 +62,9 @@ srcName = srcTf == '5' ? '5m' : srcTf == '15' ? '15m' : srcTf == '60' ? '1H' : s
 useLocal = timeframe.period == srcTf
 
 // =========================================================
-// Fractal engine + bias (HH/HL = up, LH/LL = down)
-// Returns prices/times and bias AFTER applying this bar's pivots.
+// Fractal pack: events + rolling last H/L (for 50% mids)
 // =========================================================
-f_fractal_event() =>
+f_fractal_pack() =>
     float ph = ta.pivothigh(high, left, right)
     float pl = ta.pivotlow(low, left, right)
     float atr = ta.atr(atrLen)
@@ -68,6 +73,10 @@ f_fractal_event() =>
     var float prevH = na
     var float prevL = na
     var int   bias = 0
+    var float lastH = na
+    var int   lastHT = na
+    var float lastL = na
+    var int   lastLT = na
 
     float hPrice = na
     int   hTime  = na
@@ -82,6 +91,8 @@ f_fractal_event() =>
                 bias := ph > prevH ? 1 : ph < prevH ? -1 : bias
             hPrice := ph
             hTime  := time[right]
+            lastH := ph
+            lastHT := time[right]
             prevH := ph
 
     if not na(pl)
@@ -92,10 +103,16 @@ f_fractal_event() =>
                 bias := pl > prevL ? 1 : pl < prevL ? -1 : bias
             lPrice := pl
             lTime  := time[right]
+            lastL := pl
+            lastLT := time[right]
             prevL := pl
 
-    [hPrice, hTime, lPrice, lTime, bias]
+    [hPrice, hTime, lPrice, lTime, bias, lastH, lastHT, lastL, lastLT]
 
+f_bias_color(b) =>
+    b > 0 ? upColor : b < 0 ? downColor : flatColor
+
+// ---- Markers from mapped source TF ----
 float evHPrice = na
 int   evHTime  = na
 float evLPrice = na
@@ -103,48 +120,62 @@ int   evLTime  = na
 int   evBias   = 0
 
 if useLocal
-    [h0, ht0, l0, lt0, b0] = f_fractal_event()
-    evHPrice := h0
-    evHTime  := ht0
-    evLPrice := l0
-    evLTime  := lt0
-    evBias   := b0
+    [eh0, eht0, el0, elt0, eb0, x0, x1, x2, x3] = f_fractal_pack()
+    evHPrice := eh0
+    evHTime  := eht0
+    evLPrice := el0
+    evLTime  := elt0
+    evBias   := eb0
 else
-    [h1, ht1, l1, lt1, b1] = request.security(syminfo.tickerid, srcTf, f_fractal_event(), gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off)
-    evHPrice := h1
-    evHTime  := ht1
-    evLPrice := l1
-    evLTime  := lt1
-    evBias   := nz(b1, 0)
+    [eh1, eht1, el1, elt1, eb1, y0, y1, y2, y3] = request.security(syminfo.tickerid, srcTf, f_fractal_pack(), gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off)
+    evHPrice := eh1
+    evHTime  := eht1
+    evLPrice := el1
+    evLTime  := elt1
+    evBias   := nz(eb1, 0)
 
-f_bias_color(b) =>
-    b > 0 ? upColor : b < 0 ? downColor : flatColor
+// ---- Latest H/L per TF for 50% lines (gaps_off keeps last values) ----
+[a0, a1, a2, a3, a4, lastH1h, lastHT1h, lastL1h, lastLT1h] = request.security(syminfo.tickerid, '60', f_fractal_pack(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+[b0, b1, b2, b3, b4, lastH15, lastHT15, lastL15, lastLT15] = request.security(syminfo.tickerid, '15', f_fractal_pack(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+[c0, c1, c2, c3, c4, lastH5,  lastHT5,  lastL5,  lastLT5]  = request.security(syminfo.tickerid, '5',  f_fractal_pack(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+[d0, d1, d2, d3, d4, lastH1,  lastHT1,  lastL1,  lastLT1]  = request.security(syminfo.tickerid, '1',  f_fractal_pack(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
 
 // =========================================================
-// Draw circles (no timeframe H/L text)
+// Draw circles (no timeframe text, no emoji)
 // =========================================================
 var array<int>   hiTimes  = array.new_int()
 var array<float> hiPrices = array.new_float()
 var array<label> hiMarks  = array.new_label()
-var array<label> hiEmos   = array.new_label()
 
 var array<int>   loTimes  = array.new_int()
 var array<float> loPrices = array.new_float()
 var array<label> loMarks  = array.new_label()
-var array<label> loEmos   = array.new_label()
 
-var line midLn = na
-var int  lastBias = 0
+var int lastBias = 0
 
-f_trim(arrT, arrP, arrM, arrE) =>
+var line midLn1h = na
+var line midLn15 = na
+var line midLn5  = na
+var line midLn1  = na
+var float midCache1h = na
+var float midCache15 = na
+var float midCache5  = na
+var float midCache1  = na
+var int midTH1h = na
+var int midTL1h = na
+var int midTH15 = na
+var int midTL15 = na
+var int midTH5  = na
+var int midTL5  = na
+var int midTH1  = na
+var int midTL1  = na
+
+f_trim(arrT, arrP, arrM) =>
     if keepLastN > 0
         for i = 0 to 200
             if array.size(arrT) <= keepLastN
                 break
             label.delete(array.shift(arrM))
-            label oldE = array.shift(arrE)
-            if not na(oldE)
-                label.delete(oldE)
             array.shift(arrT)
             array.shift(arrP)
 
@@ -158,6 +189,30 @@ f_already(arrT, arrP, t, p) =>
                 break
     found
 
+f_set_mid(ln, show, col, h, ht, l, lt, cacheMid, cacheTH, cacheTL) =>
+    line outLn = ln
+    float outMid = cacheMid
+    int outTH = cacheTH
+    int outTL = cacheTL
+    if show and not na(h) and not na(l) and not na(ht) and not na(lt)
+        float mid = (h + l) / 2.0
+        bool changed = na(cacheMid) or cacheMid != mid or na(cacheTH) or cacheTH != ht or na(cacheTL) or cacheTL != lt
+        if changed
+            if not na(outLn)
+                line.delete(outLn)
+            outLn := line.new(math.min(ht, lt), mid, math.max(ht, lt), mid, xloc = xloc.bar_time, extend = extend.right, color = col, width = midWidth, style = line.style_dotted)
+            outMid := mid
+            outTH := ht
+            outTL := lt
+    else
+        if not na(outLn)
+            line.delete(outLn)
+        outLn := na
+        outMid := na
+        outTH := na
+        outTL := na
+    [outLn, outMid, outTH, outTL]
+
 bool newHigh = not na(evHPrice) and not na(evHTime)
 bool newLow  = not na(evLPrice) and not na(evLTime)
 
@@ -170,26 +225,38 @@ if newHigh and not f_already(hiTimes, hiPrices, evHTime, evHPrice)
     array.push(hiTimes, evHTime)
     array.push(hiPrices, evHPrice)
     array.push(hiMarks, label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_circle, size = markSize, text = '', color = markCol))
-    array.push(hiEmos, showEmoji ? label.new(x = evHTime, y = evHPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
-    f_trim(hiTimes, hiPrices, hiMarks, hiEmos)
+    f_trim(hiTimes, hiPrices, hiMarks)
 
 if newLow and not f_already(loTimes, loPrices, evLTime, evLPrice)
     array.push(loTimes, evLTime)
     array.push(loPrices, evLPrice)
     array.push(loMarks, label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_circle, size = markSize, text = '', color = markCol))
-    array.push(loEmos, showEmoji ? label.new(x = evLTime, y = evLPrice, xloc = xloc.bar_time, style = label.style_none, size = size.normal, text = '😊', textcolor = color.yellow, color = color.new(color.black, 100)) : na)
-    f_trim(loTimes, loPrices, loMarks, loEmos)
+    f_trim(loTimes, loPrices, loMarks)
 
-if showMid and array.size(hiPrices) > 0 and array.size(loPrices) > 0
-    if newHigh or newLow
-        if not na(midLn)
-            line.delete(midLn)
-        float lh = array.get(hiPrices, array.size(hiPrices) - 1)
-        float ll = array.get(loPrices, array.size(loPrices) - 1)
-        int   th = array.get(hiTimes, array.size(hiTimes) - 1)
-        int   tl = array.get(loTimes, array.size(loTimes) - 1)
-        float mid = (lh + ll) / 2.0
-        midLn := line.new(math.min(th, tl), mid, math.max(th, tl), mid, xloc = xloc.bar_time, extend = extend.right, color = midColor, width = 2, style = line.style_dotted)
+// ---- Multi-TF 50% lines ----
+[nLn1h, nMid1h, nTH1h, nTL1h] = f_set_mid(midLn1h, showMid1h, colMid1h, lastH1h, lastHT1h, lastL1h, lastLT1h, midCache1h, midTH1h, midTL1h)
+midLn1h := nLn1h
+midCache1h := nMid1h
+midTH1h := nTH1h
+midTL1h := nTL1h
+
+[nLn15, nMid15, nTH15, nTL15] = f_set_mid(midLn15, showMid15, colMid15, lastH15, lastHT15, lastL15, lastLT15, midCache15, midTH15, midTL15)
+midLn15 := nLn15
+midCache15 := nMid15
+midTH15 := nTH15
+midTL15 := nTL15
+
+[nLn5, nMid5, nTH5, nTL5] = f_set_mid(midLn5, showMid5, colMid5, lastH5, lastHT5, lastL5, lastLT5, midCache5, midTH5, midTL5)
+midLn5 := nLn5
+midCache5 := nMid5
+midTH5 := nTH5
+midTL5 := nTL5
+
+[nLn1, nMid1, nTH1, nTL1] = f_set_mid(midLn1, showMid1, colMid1, lastH1, lastHT1, lastL1, lastLT1, midCache1, midTH1, midTL1)
+midLn1 := nLn1
+midCache1 := nMid1
+midTH1 := nTH1
+midTL1 := nTL1
 
 var table info = table.new(position.top_right, 1, 3, bgcolor = color.new(color.black, 70))
 if barstate.islast

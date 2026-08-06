@@ -4,21 +4,21 @@ TradingView Pine Script v6 — **Williams Fractals** (Periods = **3**). **Not da
 
 ## Markers
 
-- Shape: **circle** (no `1H H` / `5m L` text)
-- Color by **bias**:
-  - **Uptrend** (higher high / higher low) → green
-  - **Downtrend** (lower high / lower low) → red
+- Shape: **circle** (no timeframe text, no emoji)
+- Color by **bias**: Uptrend (HH/HL) green · Downtrend (LH/LL) red
 
-## Test anchors (1H, NY)
+## 50% lines (settings group)
 
-| Side | Candle |
-|------|--------|
-| High | Fri **31 Jul 2026 02:00** |
-| Low  | Fri **31 Jul 2026 10:00** |
-| High | Wed **5 Aug 2026 03:00** |
-| Low  | Wed **5 Aug 2026 06:00** |
+Toggle each TF mid independently, each with its own color. Example on **1m**: show 1H + 15m + 5m + 1m 50% lines together.
 
-## Timeframe map
+| Setting | Default color |
+|---------|---------------|
+| Show 1H 50% | orange |
+| Show 15m 50% | cyan |
+| Show 5m 50% | yellow |
+| Show 1m 50% | magenta |
+
+## Marker timeframe map
 
 | Chart | Shows |
 |-------|--------|
