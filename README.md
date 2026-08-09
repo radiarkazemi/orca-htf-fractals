@@ -19,4 +19,5 @@ Disabled HTF / label / protected options are hardcoded off and **hidden** from I
 
 - **Show ONLY setup circles** — hides non-setup marks when on  
 - **Show orange circles** — separate toggle for MSS extreme (orange) circles (only when setup-only is off)  
-- Setup = **two same-color circles** (green bullish / red bearish) → **dealing range** high→low with **50%** line
+- Dealing range only when **two consecutive circles are the same color** (green→green or red→red)
+- **Only the last** dealing range is kept (previous box/levels are removed)
