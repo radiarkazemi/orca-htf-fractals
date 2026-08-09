@@ -1,26 +1,22 @@
 # Orca
 
-TradingView Pine Script v6 — team trader **Orca** indicator (BOS / MSS / setup circles / patterns).
+TradingView Pine Script v6 — team trader **Orca** (BOS / MSS / setup circles / dealing ranges).
 
 Main file: [`Orca.pine`](Orca.pine)
 
-## Default settings (as provided)
+## Visible settings
 
-| Input | Default |
+| Group | Options |
 |-------|---------|
-| Bars Left / Right | **1** / **1** |
-| Break confirmation | **Close (Body)** |
-| Show BOS/MSS text | off |
-| BOS / MSS line colors | orange / aqua |
-| Line thickness | **1** |
-| Orange extreme circle | on, **Small**, transparency 0 |
-| HH/HL/LL/LH on circles | off |
-| HTF levels / HTF circles | off |
-| HTF for circles | 15 |
-| MSS after BOS label | off |
-| Pattern detections | all on |
-| Show Protected H/L | on |
-| Show ONLY setup circles | **on** |
-| Setup 50% line | orange, width **1**, extend **off** |
+| Core | Bars L/R, break type, BOS/MSS colors & width |
+| Circles | **Show orange circles**, **Show ONLY setup circles**, sizes/colors |
+| Patterns | Bullish/bearish reversal & continuation toggles |
+| Dealing Range | Box + **0.5** (and optional 0.618 / 0.786) |
 
-Paste `Orca.pine` into the Pine Editor and add to chart.
+Disabled HTF / label / protected options are hardcoded off and **hidden** from Inputs.
+
+## Behavior
+
+- **Show ONLY setup circles** — hides non-setup marks when on  
+- **Show orange circles** — separate toggle for MSS extreme (orange) circles (only when setup-only is off)  
+- Setup = **two same-color circles** (green bullish / red bearish) → **dealing range** high→low with **50%** line

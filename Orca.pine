@@ -1,5 +1,5 @@
 //@version=6
-indicator('Orca', overlay = true, max_lines_count = 500, max_labels_count = 500)
+indicator('Orca', overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
 
 // ---------- Table for latest BOS/MSS status ----------
 
@@ -114,79 +114,61 @@ getBOSorMSS(tf) =>
     result
 
 
-// ---------- Inputs ----------
-// Defaults match team trader Orca settings (screenshots)
-left  = input.int(1, 'Bars Left (چند کندل چپ)', minval = 1)
-right = input.int(1, 'Bars Right (چند کندل راست)', minval = 1)
-breakType = input.string('Close (Body)', 'نوع تأیید شکست', options = ['Wick (High/Low)', 'Close (Body)'])
+// ---------- Inputs (only what we keep visible) ----------
+grpCore = 'Core'
+left  = input.int(1, 'Bars Left (چند کندل چپ)', minval = 1, group = grpCore)
+right = input.int(1, 'Bars Right (چند کندل راست)', minval = 1, group = grpCore)
+breakType = input.string('Close (Body)', 'نوع تأیید شکست', options = ['Wick (High/Low)', 'Close (Body)'], group = grpCore)
 
-showLabels = input.bool(false, 'نمایش نوشته BOS/MSS')
-bosColor   = input.color(color.orange, 'رنگ خط BOS')
-mssColor   = input.color(color.aqua,   'رنگ خط MSS')
-bosWidth   = input.int(1, 'ضخامت خط', minval = 1, maxval = 5)
-bosTextSizeStr = input.string('Normal', 'اندازه نوشته', options = ['Tiny','Small','Normal','Large'])
-labelOffsetTicks = input.int(6, 'فاصله نوشته از خط (تیک)', minval = 1)
+bosColor   = input.color(color.orange, 'رنگ خط BOS', group = grpCore)
+mssColor   = input.color(color.aqua,   'رنگ خط MSS', group = grpCore)
+bosWidth   = input.int(1, 'ضخامت خط', minval = 1, maxval = 5, group = grpCore)
+bosTextSizeStr = input.string('Normal', 'اندازه نوشته', options = ['Tiny','Small','Normal','Large'], group = grpCore)
+labelOffsetTicks = input.int(6, 'فاصله نوشته از خط (تیک)', minval = 1, group = grpCore)
 
-showCircle   = input.bool(true,  'نمایش دایرهٔ نارنجی (اکستریم بین BOS و MSS)')
-circleSizeStr= input.string('Small', 'اندازه دایره', options = ['Tiny','Small','Normal','Large','Huge'])
-circleAlpha  = input.int(0, 'شفافیت دایره (۰ پررنگ…۱۰۰ شفاف)', minval=0, maxval=100)
-circleColor  = input.color(color.orange, 'رنگ دایره')
+grpCirc = 'Circles'
+// Separate from setup-only: orange MSS extreme circles
+showOrangeCircles = input.bool(false, 'Show orange circles (MSS extremes)', group = grpCirc, tooltip = 'Independent of setup circles. Hidden while “Show ONLY setup circles” is on.')
+onlySetupCircles  = input.bool(true, 'Show ONLY setup circles (hide non-setup circles)', group = grpCirc)
+circleSizeStr = input.string('Small', 'اندازه دایره', options = ['Tiny','Small','Normal','Large','Huge'], group = grpCirc)
+circleAlpha   = input.int(0, 'شفافیت دایره (۰ پررنگ…۱۰۰ شفاف)', minval = 0, maxval = 100, group = grpCirc)
+circleColor   = input.color(color.orange, 'رنگ دایره نارنجی', group = grpCirc)
+bullishSetupCircleColor = input.color(color.lime, 'Bullish setup circle color', group = grpCirc)
+bearishSetupCircleColor = input.color(color.red,  'Bearish setup circle color', group = grpCirc)
 
-// ---- NEW: برچسب‌های HH/HL/LL/LH روی دایره‌ها
-showCircleRank  = input.bool(false, 'نمایش HH / HL / LL / LH روی دایره‌ها')
-circleTextColor = input.color(color.white, 'رنگ متن داخل دایره')
+grpPat = 'Patterns'
+detectBullishPattern = input.bool(true, 'Detect Bullish LL→LH→LL→HH', group = grpPat)
+detectBearishPattern = input.bool(true, 'Detect Bearish HH→HL→HH→LL', group = grpPat)
+detectBearishCont    = input.bool(true, 'Detect Bearish HH→LL→LH→LL', group = grpPat)
+detectBullishCont    = input.bool(true, 'Detect Bullish LL→HH→HL→HH', group = grpPat)
+detectBullishRev_HL  = input.bool(true, 'Detect Bullish LL→LH→HL→HH', group = grpPat)
 
-// —— HTF options ——
-drawHTFLevels = input.bool(false, 'رسم سطح HTF (ساده و Extend Right)')
-showHTFLabels = input.bool(false, 'نمایش نوشته روی سطح HTF کات‌شده')
-addHTFOnBOS   = input.bool(false, 'افزودن سطح HTF در لحظه BOS (روی lastSH/lastSL)')
+grpDR = 'Dealing Range'
+showDealingRange = input.bool(true, 'Draw dealing range (same-color pair)', group = grpDR)
+showDrFibs       = input.bool(true, 'Show 0.618 / 0.786 levels', group = grpDR)
+midlineColor     = input.color(color.red, '50% line color', group = grpDR)
+midlineWidth     = input.int(2, '50% line width', minval = 1, maxval = 5, group = grpDR)
+drAhead          = input.int(8, 'Range bars ahead', minval = 1, maxval = 50, group = grpDR)
+drBoxTopBg       = input.color(color.new(color.gray, 85), 'Box top fill', group = grpDR)
+drBoxBotBg       = input.color(color.new(color.red, 90), 'Box bottom fill', group = grpDR)
+drFib618Color    = input.color(#A5D6A7, '0.618 color', group = grpDR)
+drFib786Color    = input.color(#4DD0E1, '0.786 color', group = grpDR)
 
-// —— Cross-TF orange circles ——
-showHTFSelectedCircles = input.bool(false, 'نمایش دایره‌های HTF انتخابی روی همین چارت')
-selectedHTF            = input.timeframe('15', 'تایم‌فریم HTF برای دایره‌ها')
-htfCircleColor         = input.color(color.fuchsia, 'رنگ دایرهٔ HTF انتخابی')
-htfCircleSizeStr = input.string('Small', 'اندازه دایره HTF (از تایم‌فریم انتخابی)', options = ['Tiny','Small','Normal','Large','Huge'])
-
-// —— NEW: Labels for “BOS after MSS” ——
-showAfterMSSLabel = input.bool(false, 'نمایش لیبل «MSS پس از BOS»')
-afterLabelColor   = input.color(color.fuchsia, 'رنگ لیبل «MSS پس از BOS»')
-afterLabelOffsetMultiplier = input.int(2, 'ضریب فاصلهٔ عمودی لیبل بعد MSS', minval = 1, maxval = 5)
-
-// ===== NEW: Pattern-detection inputs =====
-detectBullishPattern = input.bool(true, 'Detect Bullish LL→LH→LL→HH')
-patternLabelColor    = input.color(color.lime, 'Bullish pattern label color')
-drawGuideLL2toHH     = input.bool(true, 'Draw dotted guide from LL2 → HH when detected')
-
-detectBearishPattern      = input.bool(true, 'Detect Bearish HH→HL→HH→LL')
-bearishPatternLabelColor  = input.color(color.red, 'Bearish pattern label color')
-drawGuideHH2toLL          = input.bool(true, 'Draw dotted guide from HH2 → LL when detected')
-
-detectBearishCont      = input.bool(true, 'Detect Bearish HH→LL→LH→LL')
-bearishContLabelColor  = input.color(color.red, 'Bearish cont. label color')
-drawGuideLHtoLL2       = input.bool(true, 'Draw dotted guide from LH → LL2')
-
-detectBullishCont      = input.bool(true, 'Detect Bullish LL→HH→HL→HH')
-bullishContLabelColor  = input.color(color.lime, 'Bullish cont. label color')
-drawGuideHLtoHH2       = input.bool(true, 'Draw dotted guide from HL → HH2')
-
-detectBullishRev_HL   = input.bool(true, 'Detect Bullish LL→LH→HL→HH')
-bullishRevHLColor     = input.color(color.lime, 'Bullish reversal (HL) label color')
-drawGuideHLtoHH       = input.bool(true, 'Draw dotted guide from HL → HH')
-
-showProtected     = input.bool(true,  'Show Protected H/L')
-protLowColor      = input.color(color.lime, 'Protected Low line')
-protHighColor     = input.color(color.red,  'Protected High line')
-protLineWidth     = input.int(2, 'Protected line width', minval=1, maxval=5)
-protLabelBg       = input.color(color.new(color.black, 100), 'Protected label bg')
-protLabelTxtCol   = input.color(color.white, 'Protected label text')
-
-// --- NEW: Setup-only rendering + 50% midline ---
-onlySetupCircles = input.bool(true, 'Show ONLY setup circles (hide non-setup circles)')
-midlineColor     = input.color(color.orange, 'Setup 50% line color')
-midlineWidth     = input.int(1, 'Setup 50% line width', minval=1, maxval=5)
-extendMidline    = input.bool(false, 'Extend 50% line to the right')
-bullishSetupCircleColor = input.color(color.lime, 'Bullish setup circle color')
-bearishSetupCircleColor = input.color(color.red,  'Bearish setup circle color')
+// ---- Hidden (disabled) — not shown in settings ----
+showLabels = false
+showCircleRank = false
+circleTextColor = color.white
+drawHTFLevels = false
+showHTFLabels = false
+addHTFOnBOS = false
+showHTFSelectedCircles = false
+selectedHTF = '15'
+htfCircleColor = color.fuchsia
+htfCircleSizeStr = 'Small'
+showAfterMSSLabel = false
+afterLabelColor = color.fuchsia
+afterLabelOffsetMultiplier = 2
+extendMidline = false
 
 // ---------- Helpers ----------
 bosTextSize = bosTextSizeStr == 'Tiny' ? size.tiny : bosTextSizeStr == 'Small' ? size.small : bosTextSizeStr == 'Normal' ? size.normal : size.large
@@ -194,7 +176,6 @@ circleSize  = circleSizeStr  == 'Tiny' ? size.tiny : circleSizeStr  == 'Small' ?
 htfCircleSize = htfCircleSizeStr == 'Tiny' ? size.tiny : htfCircleSizeStr == 'Small' ? size.small : htfCircleSizeStr == 'Normal' ? size.normal : htfCircleSizeStr == 'Large' ? size.large  : size.huge
 
 dy  = syminfo.mintick * labelOffsetTicks
-// extra vertical offset for the new label, to avoid overlaps
 dy2 = dy * afterLabelOffsetMultiplier
 
 useHighOrClose = breakType == 'Wick (High/Low)' ? high : close
@@ -533,10 +514,34 @@ f_kindColor(_tp) =>
 f_circle(_x, _y, _txt, _col) =>
     label.new(x=_x, y=_y, style=label.style_circle, size=circleSize, text=showCircleRank ? _txt : '', textcolor=circleTextColor, color=color.new(_col, circleAlpha))
 
-// ---------- Helper: draw a setup (top/bottom circles + 50% midline + label) ----------
-// ---------- Helper: draw a setup (top/bottom circles + 50% midline + label) ----------
+// Same-color setup pair → dealing range (high→low) + 50% (+ optional fibs)
+f_draw_dealing_range(topP, botP, topBar, botBar, _circColor) =>
+    int x1 = math.min(topBar, botBar)
+    int x2 = math.max(topBar, botBar) + drAhead
+    float mid = (topP + botP) / 2.0
+    float rng = topP - botP
+    float y786 = botP + rng * 0.786
+    float y618 = botP + rng * 0.618
+
+    // Main range box
+    box.new(x1, topP, x2, botP, xloc = xloc.bar_index, border_color = color.new(_circColor, 40), border_width = 1, bgcolor = color.new(color.black, 92), extend = extend.none)
+
+    // Soft fills: top band (0.786→1.0) and bottom band (0→0.5)
+    box.new(x1, topP, x2, y786, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = drBoxTopBg, extend = extend.none)
+    box.new(x1, mid, x2, botP, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = drBoxBotBg, extend = extend.none)
+
+    // 50% (emphasized)
+    line.new(x1, mid, x2, mid, xloc = xloc.bar_index, extend = extend.none, color = midlineColor, width = midlineWidth, style = line.style_dashed)
+    label.new(x2, mid, '0.5', xloc = xloc.bar_index, style = label.style_label_left, size = size.small, textcolor = midlineColor, color = color.new(color.black, 100))
+
+    if showDrFibs
+        line.new(x1, y618, x2, y618, xloc = xloc.bar_index, extend = extend.none, color = drFib618Color, width = 1, style = line.style_dotted)
+        label.new(x2, y618, '0.618', xloc = xloc.bar_index, style = label.style_label_left, size = size.tiny, textcolor = drFib618Color, color = color.new(color.black, 100))
+        line.new(x1, y786, x2, y786, xloc = xloc.bar_index, extend = extend.none, color = drFib786Color, width = 1, style = line.style_dotted)
+        label.new(x2, y786, '0.786', xloc = xloc.bar_index, style = label.style_label_left, size = size.tiny, textcolor = drFib786Color, color = color.new(color.black, 100))
+
+// Setup = two same-color circles (high + low) → dealing range
 f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor) =>
-    // read prices/bars for the 4-circle window
     float p0 = array.get(crPrice, _i0)
     float p1 = array.get(crPrice, _i1)
     float p2 = array.get(crPrice, _i2)
@@ -546,59 +551,56 @@ f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor) =>
     int   b2 = array.get(crBar,   _i2)
     int   b3 = array.get(crBar,   _i3)
 
-    // find top/bottom (price + where they happened)
     float topP = math.max(math.max(p0, p1), math.max(p2, p3))
     float botP = math.min(math.min(p0, p1), math.min(p2, p3))
     int   topBar = topP == p0 ? b0 : topP == p1 ? b1 : topP == p2 ? b2 : b3
     int   botBar = botP == p0 ? b0 : botP == p1 ? b1 : botP == p2 ? b2 : b3
 
-    // draw only the two key circles for the setup (now colored by setup type)
+    // Two same-color circles (green bullish / red bearish)
     f_circle(botBar, botP, '', _circColor)
     f_circle(topBar, topP, '', _circColor)
 
-    // draw 50% midline
+    if showDealingRange
+        f_draw_dealing_range(topP, botP, topBar, botBar, _circColor)
+
     float mid = (topP + botP) / 2.0
-    int x2 = extendMidline ? bar_index + 1 : topBar
-    line.new(botBar, mid, x2, mid, xloc=xloc.bar_index, extend=extendMidline ? extend.right : extend.none,
-             color=midlineColor, width=midlineWidth, style=line.style_dotted)
-
-    // setup label near midline
     float yLab = _labelUp ? (mid + dy) : (mid - dy)
-    label.new(bar_index, yLab, _name, style=label.style_label_center,
-              size=bosTextSize, textcolor=color.white, color=color.new(color.black, 100))
+    label.new(math.max(topBar, botBar), yLab, _name, style = label.style_label_center, size = bosTextSize, textcolor = color.white, color = color.new(color.black, 100))
 
-// ===== draw circles + push events + detect pattern =====
+// ===== track MSS extremes (+ optional orange circles) =====
 var bool justDrewCircle = false
 justDrewCircle := false
 
-if showCircle
-    // MSS+ ⇒ Low extreme circle
-    if mssPlusNow and preBOSDir == -1 and not na(trkLowBar)
-        string lowTag = ""
-        if not na(lastLowCircle)
-            lowTag := trkLow > lastLowCircle ? "HL" : trkLow < lastLowCircle ? "LL" : ""
-        // draw only if NOT in setup-only mode
-        if not onlySetupCircles
-            f_circle(trkLowBar, trkLow, lowTag, circleColor)
-        f_addHTFLevel(trkLowBar, trkLow, 2)
-        f_push_circle(2, trkLow, trkLowBar)
-        justDrewCircle := true
-        lastLowCircle := trkLow
-        trkLow := na
-        trkLowBar := na
-    // MSS- ⇒ High extreme circle
-    if mssMinusNow and preBOSDir == +1 and not na(trkHighBar)
-        string highTag = ""
-        if not na(lastHighCircle)
-            highTag := trkHigh > lastHighCircle ? "HH" : trkHigh < lastHighCircle ? "LH" : ""
-        if not onlySetupCircles
-            f_circle(trkHighBar, trkHigh, highTag, circleColor)
-        f_addHTFLevel(trkHighBar, trkHigh, -2)
-        f_push_circle(-2, trkHigh, trkHighBar)
-        justDrewCircle := true
-        lastHighCircle := trkHigh
-        trkHigh := na
-        trkHighBar := na
+// Always track extremes for pattern detection; orange draw is separate
+bool drawOrange = showOrangeCircles and not onlySetupCircles
+
+// MSS+ ⇒ Low extreme
+if mssPlusNow and preBOSDir == -1 and not na(trkLowBar)
+    string lowTag = ""
+    if not na(lastLowCircle)
+        lowTag := trkLow > lastLowCircle ? "HL" : trkLow < lastLowCircle ? "LL" : ""
+    if drawOrange
+        f_circle(trkLowBar, trkLow, lowTag, circleColor)
+    f_addHTFLevel(trkLowBar, trkLow, 2)
+    f_push_circle(2, trkLow, trkLowBar)
+    justDrewCircle := true
+    lastLowCircle := trkLow
+    trkLow := na
+    trkLowBar := na
+
+// MSS- ⇒ High extreme
+if mssMinusNow and preBOSDir == +1 and not na(trkHighBar)
+    string highTag = ""
+    if not na(lastHighCircle)
+        highTag := trkHigh > lastHighCircle ? "HH" : trkHigh < lastHighCircle ? "LH" : ""
+    if drawOrange
+        f_circle(trkHighBar, trkHigh, highTag, circleColor)
+    f_addHTFLevel(trkHighBar, trkHigh, -2)
+    f_push_circle(-2, trkHigh, trkHighBar)
+    justDrewCircle := true
+    lastHighCircle := trkHigh
+    trkHigh := na
+    trkHighBar := na
 
 // ===== DETECTIONS → draw ONLY setup elements =====
 
