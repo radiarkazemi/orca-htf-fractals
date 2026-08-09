@@ -597,7 +597,7 @@ f_register_setup_circle(_bar, _price, _side, _col, _name, pSide, pPrice, pBar, b
         int topBar = pPrice >= _price ? pBar : _bar
         int botBar = pPrice < _price ? pBar : _bar
         if topP > botP
-            [obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786] = f_redraw_dr(obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786, topP, botP, topBar, botBar, _col, _name)
+            [obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786] := f_redraw_dr(obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786, topP, botP, topBar, botBar, _col, _name)
 
     [_side, _price, _bar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786]
 
