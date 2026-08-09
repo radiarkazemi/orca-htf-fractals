@@ -515,6 +515,7 @@ f_circle(_x, _y, _txt, _col) =>
     label.new(x=_x, y=_y, style=label.style_circle, size=circleSize, text=showCircleRank ? _txt : '', textcolor=circleTextColor, color=color.new(_col, circleAlpha))
 
 // ---- Only ONE dealing range at a time (last same-color pair) ----
+// Pine cannot assign globals inside functions (CE10088) — pass/return refs.
 var box   drBoxMain = na
 var box   drBoxTop  = na
 var box   drBoxBot  = na
@@ -530,38 +531,33 @@ var int   prevCircSide  = 0
 var float prevCircPrice = na
 var int   prevCircBar   = na
 
-f_clear_dr() =>
-    if not na(drBoxMain)
-        box.delete(drBoxMain)
-    if not na(drBoxTop)
-        box.delete(drBoxTop)
-    if not na(drBoxBot)
-        box.delete(drBoxBot)
-    if not na(drLn50)
-        line.delete(drLn50)
-    if not na(drLn618)
-        line.delete(drLn618)
-    if not na(drLn786)
-        line.delete(drLn786)
-    if not na(drLb50)
-        label.delete(drLb50)
-    if not na(drLb618)
-        label.delete(drLb618)
-    if not na(drLb786)
-        label.delete(drLb786)
-    drBoxMain := na
-    drBoxTop := na
-    drBoxBot := na
-    drLn50 := na
-    drLn618 := na
-    drLn786 := na
-    drLb50 := na
-    drLb618 := na
-    drLb786 := na
+f_del_box(b) =>
+    if not na(b)
+        box.delete(b)
+    na
 
-// Draw dealing range high→low; replaces any previous range
-f_draw_dealing_range(topP, botP, topBar, botBar, _circColor, _name) =>
-    f_clear_dr()
+f_del_line(ln) =>
+    if not na(ln)
+        line.delete(ln)
+    na
+
+f_del_label(lb) =>
+    if not na(lb)
+        label.delete(lb)
+    na
+
+// Delete old DR objects and create the new last range; returns new refs
+f_redraw_dr(bMain, bTop, bBot, l50, l618, l786, lb50, lb618, lb786, topP, botP, topBar, botBar, _circColor, _name) =>
+    box nbMain = f_del_box(bMain)
+    box nbTop = f_del_box(bTop)
+    box nbBot = f_del_box(bBot)
+    line nl50 = f_del_line(l50)
+    line nl618 = f_del_line(l618)
+    line nl786 = f_del_line(l786)
+    label nlb50 = f_del_label(lb50)
+    label nlb618 = f_del_label(lb618)
+    label nlb786 = f_del_label(lb786)
+
     int x1 = math.min(topBar, botBar)
     int x2 = math.max(topBar, botBar) + drAhead
     float mid = (topP + botP) / 2.0
@@ -569,36 +565,44 @@ f_draw_dealing_range(topP, botP, topBar, botBar, _circColor, _name) =>
     float y786 = botP + rng * 0.786
     float y618 = botP + rng * 0.618
 
-    drBoxMain := box.new(x1, topP, x2, botP, xloc = xloc.bar_index, border_color = color.new(_circColor, 40), border_width = 1, bgcolor = color.new(color.black, 92), extend = extend.none)
-    drBoxTop := box.new(x1, topP, x2, y786, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = drBoxTopBg, extend = extend.none)
-    drBoxBot := box.new(x1, mid, x2, botP, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = drBoxBotBg, extend = extend.none)
-
-    drLn50 := line.new(x1, mid, x2, mid, xloc = xloc.bar_index, extend = extend.none, color = midlineColor, width = midlineWidth, style = line.style_dashed)
-    drLb50 := label.new(x2, mid, _name + ' 0.5', xloc = xloc.bar_index, style = label.style_label_left, size = size.small, textcolor = midlineColor, color = color.new(color.black, 100))
+    nbMain := box.new(x1, topP, x2, botP, xloc = xloc.bar_index, border_color = color.new(_circColor, 40), border_width = 1, bgcolor = color.new(color.black, 92), extend = extend.none)
+    nbTop := box.new(x1, topP, x2, y786, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = drBoxTopBg, extend = extend.none)
+    nbBot := box.new(x1, mid, x2, botP, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = drBoxBotBg, extend = extend.none)
+    nl50 := line.new(x1, mid, x2, mid, xloc = xloc.bar_index, extend = extend.none, color = midlineColor, width = midlineWidth, style = line.style_dashed)
+    nlb50 := label.new(x2, mid, _name + ' 0.5', xloc = xloc.bar_index, style = label.style_label_left, size = size.small, textcolor = midlineColor, color = color.new(color.black, 100))
 
     if showDrFibs
-        drLn618 := line.new(x1, y618, x2, y618, xloc = xloc.bar_index, extend = extend.none, color = drFib618Color, width = 1, style = line.style_dotted)
-        drLb618 := label.new(x2, y618, '0.618', xloc = xloc.bar_index, style = label.style_label_left, size = size.tiny, textcolor = drFib618Color, color = color.new(color.black, 100))
-        drLn786 := line.new(x1, y786, x2, y786, xloc = xloc.bar_index, extend = extend.none, color = drFib786Color, width = 1, style = line.style_dotted)
-        drLb786 := label.new(x2, y786, '0.786', xloc = xloc.bar_index, style = label.style_label_left, size = size.tiny, textcolor = drFib786Color, color = color.new(color.black, 100))
+        nl618 := line.new(x1, y618, x2, y618, xloc = xloc.bar_index, extend = extend.none, color = drFib618Color, width = 1, style = line.style_dotted)
+        nlb618 := label.new(x2, y618, '0.618', xloc = xloc.bar_index, style = label.style_label_left, size = size.tiny, textcolor = drFib618Color, color = color.new(color.black, 100))
+        nl786 := line.new(x1, y786, x2, y786, xloc = xloc.bar_index, extend = extend.none, color = drFib786Color, width = 1, style = line.style_dotted)
+        nlb786 := label.new(x2, y786, '0.786', xloc = xloc.bar_index, style = label.style_label_left, size = size.tiny, textcolor = drFib786Color, color = color.new(color.black, 100))
 
-// Register one setup circle in time order.
-// Dealing range ONLY if this circle is the same color as the previous one (green-green or red-red).
-f_register_setup_circle(_bar, _price, _side, _col, _name) =>
-    if showDealingRange and _side == prevCircSide and prevCircSide != 0 and not na(prevCircPrice) and not na(prevCircBar) and _bar != prevCircBar
-        float topP = math.max(prevCircPrice, _price)
-        float botP = math.min(prevCircPrice, _price)
-        int topBar = prevCircPrice >= _price ? prevCircBar : _bar
-        int botBar = prevCircPrice < _price ? prevCircBar : _bar
-        // need a real high/low span
+    [nbMain, nbTop, nbBot, nl50, nl618, nl786, nlb50, nlb618, nlb786]
+
+// Register one circle; may rebuild DR. Returns updated prev + DR refs.
+f_register_setup_circle(_bar, _price, _side, _col, _name, pSide, pPrice, pBar, bMain, bTop, bBot, l50, l618, l786, lb50, lb618, lb786) =>
+    box obMain = bMain
+    box obTop = bTop
+    box obBot = bBot
+    line ol50 = l50
+    line ol618 = l618
+    line ol786 = l786
+    label olb50 = lb50
+    label olb618 = lb618
+    label olb786 = lb786
+
+    if showDealingRange and _side == pSide and pSide != 0 and not na(pPrice) and not na(pBar) and _bar != pBar
+        float topP = math.max(pPrice, _price)
+        float botP = math.min(pPrice, _price)
+        int topBar = pPrice >= _price ? pBar : _bar
+        int botBar = pPrice < _price ? pBar : _bar
         if topP > botP
-            f_draw_dealing_range(topP, botP, topBar, botBar, _col, _name)
-    prevCircSide := _side
-    prevCircPrice := _price
-    prevCircBar := _bar
+            [obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786] = f_redraw_dr(obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786, topP, botP, topBar, botBar, _col, _name)
 
-// Setup circles only; dealing range via consecutive same-color registration
-f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor) =>
+    [_side, _price, _bar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786]
+
+// Setup circles + consecutive same-color DR registration (returns updated state)
+f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, pSide, pPrice, pBar, bMain, bTop, bBot, l50, l618, l786, lb50, lb618, lb786) =>
     float p0 = array.get(crPrice, _i0)
     float p1 = array.get(crPrice, _i1)
     float p2 = array.get(crPrice, _i2)
@@ -612,20 +616,33 @@ f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor) =>
     float botP = math.min(math.min(p0, p1), math.min(p2, p3))
     int   topBar = topP == p0 ? b0 : topP == p1 ? b1 : topP == p2 ? b2 : b3
     int   botBar = botP == p0 ? b0 : botP == p1 ? b1 : botP == p2 ? b2 : b3
-
-    // +1 green (bullish) / -1 red (bearish)
-    int side = _labelUp ? 1 : -1
+    int   side = _labelUp ? 1 : -1
 
     f_circle(botBar, botP, '', _circColor)
     f_circle(topBar, topP, '', _circColor)
 
+    int nSide = pSide
+    float nPrice = pPrice
+    int nBar = pBar
+    box obMain = bMain
+    box obTop = bTop
+    box obBot = bBot
+    line ol50 = l50
+    line ol618 = l618
+    line ol786 = l786
+    label olb50 = lb50
+    label olb618 = lb618
+    label olb786 = lb786
+
     // Register in chronological order — DR only on same-color consecutive
     if botBar <= topBar
-        f_register_setup_circle(botBar, botP, side, _circColor, _name)
-        f_register_setup_circle(topBar, topP, side, _circColor, _name)
+        [nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786] := f_register_setup_circle(botBar, botP, side, _circColor, _name, nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786)
+        [nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786] := f_register_setup_circle(topBar, topP, side, _circColor, _name, nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786)
     else
-        f_register_setup_circle(topBar, topP, side, _circColor, _name)
-        f_register_setup_circle(botBar, botP, side, _circColor, _name)
+        [nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786] := f_register_setup_circle(topBar, topP, side, _circColor, _name, nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786)
+        [nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786] := f_register_setup_circle(botBar, botP, side, _circColor, _name, nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786)
+
+    [nSide, nPrice, nBar, obMain, obTop, obBot, ol50, ol618, ol786, olb50, olb618, olb786]
 
 // ===== track MSS extremes (+ optional orange circles) =====
 var bool justDrewCircle = false
@@ -665,35 +682,34 @@ if mssMinusNow and preBOSDir == +1 and not na(trkHighBar)
 // ===== DETECTIONS → draw ONLY setup elements =====
 
 // Bullish Reversal (LL→LH→LL→HH)
-// Bullish Reversal (LL→LH→LL→HH)
 if detectBullishPattern and justDrewCircle
     [ok, i0, i1, i2, i3] = f_check_bullish_pattern()
     if ok
-        f_draw_setup("Bullish Reversal", i0, i1, i2, i3, true, bullishSetupCircleColor)
+        [prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786] := f_draw_setup("Bullish Reversal", i0, i1, i2, i3, true, bullishSetupCircleColor, prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786)
 
 // Bullish Reversal (LL→LH→HL→HH)
 if detectBullishRev_HL and justDrewCircle
     [okBR, a0, a1, a2, a3] = f_check_bullish_rev_hl()
     if okBR
-        f_draw_setup("Bullish Reversal", a0, a1, a2, a3, true, bullishSetupCircleColor)
+        [prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786] := f_draw_setup("Bullish Reversal", a0, a1, a2, a3, true, bullishSetupCircleColor, prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786)
 
 // Bullish Continuation (LL→HH→HL→HH)
 if detectBullishCont and justDrewCircle
     [okBC, m0, m1, m2, m3] = f_check_bullish_cont()
     if okBC
-        f_draw_setup("Bullish Continuation", m0, m1, m2, m3, true, bullishSetupCircleColor)
+        [prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786] := f_draw_setup("Bullish Continuation", m0, m1, m2, m3, true, bullishSetupCircleColor, prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786)
 
 // Bearish Reversal (HH→HL→HH→LL)
 if detectBearishPattern and justDrewCircle
     [okB, j0, j1, j2, j3] = f_check_bearish_pattern()
     if okB
-        f_draw_setup("Bearish Reversal", j0, j1, j2, j3, false, bearishSetupCircleColor)
+        [prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786] := f_draw_setup("Bearish Reversal", j0, j1, j2, j3, false, bearishSetupCircleColor, prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786)
 
 // Bearish Continuation (HH→LL→LH→LL)
 if detectBearishCont and justDrewCircle
     [okC, k0, k1, k2, k3] = f_check_bearish_cont()
     if okC
-        f_draw_setup("Bearish Continuation", k0, k1, k2, k3, false, bearishSetupCircleColor)
+        [prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786] := f_draw_setup("Bearish Continuation", k0, k1, k2, k3, false, bearishSetupCircleColor, prevCircSide, prevCircPrice, prevCircBar, drBoxMain, drBoxTop, drBoxBot, drLn50, drLn618, drLn786, drLb50, drLb618, drLb786)
 // (اختیاری) افزودن سطح HTF روی خودِ BOS
 if addHTFOnBOS and bullBOS
     f_addHTFLevel(lastSHBar, lastSH, 1)
