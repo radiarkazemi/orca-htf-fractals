@@ -565,22 +565,8 @@ f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _circColor, _name) 
         array.push(lines, line.new(x1, y786, x2, y786, xloc = xloc.bar_index, extend = extend.none, color = drFib786Color, width = 1, style = line.style_dotted))
         array.push(labels, label.new(x2, y786, '0.786', xloc = xloc.bar_index, style = label.style_label_left, size = size.tiny, textcolor = drFib786Color, color = color.new(color.black, 100)))
 
-// Register one circle against previous; paint DR only on same-color consecutive.
-// Returns updated [side, price, bar]
-f_reg_circle(boxes, lines, labels, _bar, _price, _side, _col, _name, pSide, pPrice, pBar) =>
-    int outSide = _side
-    float outPrice = _price
-    int outBar = _bar
-    if showDealingRange and _side == pSide and pSide != 0 and not na(pPrice) and not na(pBar) and _bar != pBar
-        float topP = math.max(pPrice, _price)
-        float botP = math.min(pPrice, _price)
-        int topBar = pPrice >= _price ? pBar : _bar
-        int botBar = pPrice < _price ? pBar : _bar
-        if topP > botP
-            f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _col, _name)
-    [outSide, outPrice, outBar]
-
-// Draw setup circles + register both in time order (same-color → last DR only)
+// Draw setup circles + register both in time order (same-color → last DR only).
+// Returns only final prev-circle state (single tuple return — no nested unpack).
 f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, boxes, lines, labels, pSide, pPrice, pBar) =>
     float p0 = array.get(crPrice, _i0)
     float p1 = array.get(crPrice, _i1)
@@ -605,9 +591,25 @@ f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, boxes, lines, labe
     int c2Bar = botBar <= topBar ? topBar : botBar
     float c2Price = botBar <= topBar ? topP : botP
 
-    [s1, p1b, b1b] = f_reg_circle(boxes, lines, labels, c1Bar, c1Price, side, _circColor, _name, pSide, pPrice, pBar)
-    [s2, p2b, b2b] = f_reg_circle(boxes, lines, labels, c2Bar, c2Price, side, _circColor, _name, s1, p1b, b1b)
-    [s2, p2b, b2b]
+    // Circle 1 vs previous circle (only if same color)
+    if showDealingRange and side == pSide and pSide != 0 and not na(pPrice) and not na(pBar) and c1Bar != pBar
+        float hi1 = math.max(pPrice, c1Price)
+        float lo1 = math.min(pPrice, c1Price)
+        int hiBar1 = pPrice >= c1Price ? pBar : c1Bar
+        int loBar1 = pPrice < c1Price ? pBar : c1Bar
+        if hi1 > lo1
+            f_paint_dr(boxes, lines, labels, hi1, lo1, hiBar1, loBar1, _circColor, _name)
+
+    // Circle 2 vs circle 1 (same setup color → always same-color consecutive)
+    if showDealingRange and c2Bar != c1Bar
+        float hi2 = math.max(c1Price, c2Price)
+        float lo2 = math.min(c1Price, c2Price)
+        int hiBar2 = c1Price >= c2Price ? c1Bar : c2Bar
+        int loBar2 = c1Price < c2Price ? c1Bar : c2Bar
+        if hi2 > lo2
+            f_paint_dr(boxes, lines, labels, hi2, lo2, hiBar2, loBar2, _circColor, _name)
+
+    [side, c2Price, c2Bar]
 
 // ===== track MSS extremes (+ optional orange circles) =====
 var bool justDrewCircle = false
