@@ -545,7 +545,7 @@ f_clear_dr(boxes, lines, labels) =>
                 label.delete(lb)
         array.clear(labels)
 
-f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _circColor, _name) =>
+f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _circColor, _name, _bullish) =>
     f_clear_dr(boxes, lines, labels)
     int x1 = math.min(topBar, botBar)
     int x2 = math.max(topBar, botBar) + drAhead
@@ -554,9 +554,14 @@ f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _circColor, _name) 
     float y786 = botP + rng * 0.786
     float y618 = botP + rng * 0.618
 
+    // Bearish (two red): red section DOWN, gray UP
+    // Bullish (two green): red section UP, gray DOWN
+    color upperBg = _bullish ? drBoxBotBg : drBoxTopBg
+    color lowerBg = _bullish ? drBoxTopBg : drBoxBotBg
+
     array.push(boxes, box.new(x1, topP, x2, botP, xloc = xloc.bar_index, border_color = color.new(_circColor, 40), border_width = 1, bgcolor = color.new(color.black, 92), extend = extend.none))
-    array.push(boxes, box.new(x1, topP, x2, y786, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = drBoxTopBg, extend = extend.none))
-    array.push(boxes, box.new(x1, mid, x2, botP, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = drBoxBotBg, extend = extend.none))
+    array.push(boxes, box.new(x1, topP, x2, mid, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = upperBg, extend = extend.none))
+    array.push(boxes, box.new(x1, mid, x2, botP, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = lowerBg, extend = extend.none))
     array.push(lines, line.new(x1, mid, x2, mid, xloc = xloc.bar_index, extend = extend.none, color = midlineColor, width = midlineWidth, style = line.style_dashed))
     array.push(labels, label.new(x2, mid, _name + ' 0.5', xloc = xloc.bar_index, style = label.style_label_left, size = size.small, textcolor = midlineColor, color = color.new(color.black, 100)))
     if showDrFibs
