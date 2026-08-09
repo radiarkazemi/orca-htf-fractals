@@ -149,8 +149,8 @@ showDrFibs       = input.bool(true, 'Show 0.618 / 0.786 levels', group = grpDR)
 midlineColor     = input.color(color.red, '50% line color', group = grpDR)
 midlineWidth     = input.int(2, '50% line width', minval = 1, maxval = 5, group = grpDR)
 drAhead          = input.int(8, 'Range bars ahead', minval = 1, maxval = 50, group = grpDR)
-drBoxTopBg       = input.color(color.new(color.gray, 85), 'Box top fill', group = grpDR)
-drBoxBotBg       = input.color(color.new(color.red, 90), 'Box bottom fill', group = grpDR)
+drBoxTopBg       = input.color(color.new(color.gray, 85), 'Gray fill (bearish=top / bullish=bottom)', group = grpDR)
+drBoxBotBg       = input.color(color.new(color.red, 90), 'Red fill (bearish=bottom / bullish=top)', group = grpDR)
 drFib618Color    = input.color(#A5D6A7, '0.618 color', group = grpDR)
 drFib786Color    = input.color(#4DD0E1, '0.786 color', group = grpDR)
 
@@ -603,7 +603,7 @@ f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, boxes, lines, labe
         int hiBar1 = pPrice >= c1Price ? pBar : c1Bar
         int loBar1 = pPrice < c1Price ? pBar : c1Bar
         if hi1 > lo1
-            f_paint_dr(boxes, lines, labels, hi1, lo1, hiBar1, loBar1, _circColor, _name)
+            f_paint_dr(boxes, lines, labels, hi1, lo1, hiBar1, loBar1, _circColor, _name, _labelUp)
 
     // Circle 2 vs circle 1 (same setup color → always same-color consecutive)
     if showDealingRange and c2Bar != c1Bar
@@ -612,7 +612,7 @@ f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, boxes, lines, labe
         int hiBar2 = c1Price >= c2Price ? c1Bar : c2Bar
         int loBar2 = c1Price < c2Price ? c1Bar : c2Bar
         if hi2 > lo2
-            f_paint_dr(boxes, lines, labels, hi2, lo2, hiBar2, loBar2, _circColor, _name)
+            f_paint_dr(boxes, lines, labels, hi2, lo2, hiBar2, loBar2, _circColor, _name, _labelUp)
 
     [side, c2Price, c2Bar]
 
