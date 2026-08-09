@@ -1,29 +1,26 @@
-# Orca HTF Fractals
+# Orca
 
-TradingView Pine Script v6 — **Williams Fractals** (Periods = **3**). **Not date-hardcoded.**
+TradingView Pine Script v6 — team trader **Orca** indicator (BOS / MSS / setup circles / patterns).
 
-## Markers
+Main file: [`Orca.pine`](Orca.pine)
 
-- Shape: **circle** (no timeframe text, no emoji)
-- Color by **bias**: Uptrend (HH/HL) green · Downtrend (LH/LL) red
+## Default settings (as provided)
 
-## 50% lines (settings group)
+| Input | Default |
+|-------|---------|
+| Bars Left / Right | **1** / **1** |
+| Break confirmation | **Close (Body)** |
+| Show BOS/MSS text | off |
+| BOS / MSS line colors | orange / aqua |
+| Line thickness | **1** |
+| Orange extreme circle | on, **Small**, transparency 0 |
+| HH/HL/LL/LH on circles | off |
+| HTF levels / HTF circles | off |
+| HTF for circles | 15 |
+| MSS after BOS label | off |
+| Pattern detections | all on |
+| Show Protected H/L | on |
+| Show ONLY setup circles | **on** |
+| Setup 50% line | orange, width **1**, extend **off** |
 
-Toggle each TF mid independently (own color + **TF label**).  
-Line is a short horizontal segment: **last bar → last bar + N** (default N=6). **No extend** (fixes vertical glitch).
-
-| Setting | Default color |
-|---------|---------------|
-| Show 1H 50% | orange |
-| Show 15m 50% | cyan |
-| Show 5m 50% | yellow |
-| Show 1m 50% | magenta |
-
-## Marker timeframe map
-
-| Chart | Shows |
-|-------|--------|
-| 1H | 1H fractals |
-| 15m | **1H** fractals |
-| 5m | **15m** fractals |
-| 1m | 5m fractals |
+Paste `Orca.pine` into the Pine Editor and add to chart.

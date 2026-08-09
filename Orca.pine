@@ -1,0 +1,726 @@
+//@version=6
+indicator('Orca', overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ---------- Table for latest BOS/MSS status ----------
+
+// Function to calculate BOS/MSS states for higher timeframes
+calc_HTF_BOS_MSS() =>
+    left = 2
+    right = 2
+    // Pivot points
+    phH = ta.pivothigh(high, left, right)
+    plH = ta.pivotlow(low, left, right)
+
+    // Statuses (HTF-scope)
+    var float h_lastSH = na
+    var float h_lastSL = na
+    var int   h_lastSHBar = na
+    var int   h_lastSLBar = na
+    if not na(phH)
+        h_lastSH := phH
+        h_lastSHBar := bar_index - right
+    if not na(plH)
+        h_lastSL := plH
+        h_lastSLBar := bar_index - right
+
+    var int h_brokenSHBar = na
+    var int h_brokenSLBar = na
+    var int h_structureDir = 0
+    var int h_lastBOSDir   = na
+
+    // Tracking extremes since last BOS in HTF
+    var float h_trkHigh = na
+    var int   h_trkHighTime = na
+    var float h_trkLow  = na
+    var int   h_trkLowTime  = na
+
+    // Update extremes based on previous BOS direction
+    if h_lastBOSDir == 1
+        if na(h_trkHigh) or high > h_trkHigh
+            h_trkHigh := high
+            h_trkHighTime := time
+    if h_lastBOSDir == -1
+        if na(h_trkLow) or low < h_trkLow
+            h_trkLow := low
+            h_trkLowTime := time
+
+    // Breaks
+    bool bullBOSH = not na(h_lastSH) and (close > h_lastSH) and (na(h_brokenSHBar) or h_brokenSHBar != h_lastSHBar)
+    bool bearBOSH = not na(h_lastSL) and (close < h_lastSL) and (na(h_brokenSLBar) or h_brokenSLBar != h_lastSLBar)
+
+    int preStructH = h_structureDir
+    bool mssPlusH  = bullBOSH and preStructH == -1
+    bool mssMinusH = bearBOSH and preStructH ==  1
+
+    // Outputs
+    float outPrice = na
+    int   outDir   = na   // +2 MSS+ , -2 MSS-
+    int   outTime  = na   // exact circle time (bar_time)
+
+    // Add a check for BOS+ and BOS-
+    if bullBOSH
+        outPrice := high
+        outDir   := 1  // BOS+
+        outTime  := time
+        h_trkHigh := high
+        h_trkHighTime := time
+    if bearBOSH
+        outPrice := low
+        outDir   := -1  // BOS-
+        outTime  := time
+        h_trkLow := low
+        h_trkLowTime := time
+
+    // Add MSS+ and MSS- conditions
+    if mssPlusH
+        outPrice := high
+        outDir   := 2  // MSS+
+        outTime  := time
+    if mssMinusH
+        outPrice := low
+        outDir   := -2 // MSS-
+        outTime  := time
+
+    // End of HTF candle: Update statuses after BOS
+    if bullBOSH
+        h_brokenSHBar := h_lastSHBar
+        h_structureDir := 1
+        h_lastBOSDir := 1
+        h_trkHigh := high
+        h_trkHighTime := time
+    if bearBOSH
+        h_brokenSLBar := h_lastSLBar
+        h_structureDir := -1
+        h_lastBOSDir := -1
+        h_trkLow := low
+        h_trkLowTime := time
+
+    // Returning values for BOS and MSS
+    [outPrice, outDir, outTime]
+
+// Function to get the latest BOS/MSS for a specific timeframe
+getBOSorMSS(tf) =>
+    [price, direction, time_result] = request.security(syminfo.tickerid, tf, calc_HTF_BOS_MSS(), gaps=barmerge.gaps_on)
+    var string result = "None"
+    // Adding checks for BOS and MSS
+    if direction == 1
+        result := "BOS+"
+    else if direction == -1
+        result := "BOS-"
+    else if direction == 2
+        result := "MSS+"
+    else if direction == -2
+        result := "MSS-"
+    result
+
+
+// ---------- Inputs ----------
+// Defaults match team trader Orca settings (screenshots)
+left  = input.int(1, 'Bars Left (چند کندل چپ)', minval = 1)
+right = input.int(1, 'Bars Right (چند کندل راست)', minval = 1)
+breakType = input.string('Close (Body)', 'نوع تأیید شکست', options = ['Wick (High/Low)', 'Close (Body)'])
+
+showLabels = input.bool(false, 'نمایش نوشته BOS/MSS')
+bosColor   = input.color(color.orange, 'رنگ خط BOS')
+mssColor   = input.color(color.aqua,   'رنگ خط MSS')
+bosWidth   = input.int(1, 'ضخامت خط', minval = 1, maxval = 5)
+bosTextSizeStr = input.string('Normal', 'اندازه نوشته', options = ['Tiny','Small','Normal','Large'])
+labelOffsetTicks = input.int(6, 'فاصله نوشته از خط (تیک)', minval = 1)
+
+showCircle   = input.bool(true,  'نمایش دایرهٔ نارنجی (اکستریم بین BOS و MSS)')
+circleSizeStr= input.string('Small', 'اندازه دایره', options = ['Tiny','Small','Normal','Large','Huge'])
+circleAlpha  = input.int(0, 'شفافیت دایره (۰ پررنگ…۱۰۰ شفاف)', minval=0, maxval=100)
+circleColor  = input.color(color.orange, 'رنگ دایره')
+
+// ---- NEW: برچسب‌های HH/HL/LL/LH روی دایره‌ها
+showCircleRank  = input.bool(false, 'نمایش HH / HL / LL / LH روی دایره‌ها')
+circleTextColor = input.color(color.white, 'رنگ متن داخل دایره')
+
+// —— HTF options ——
+drawHTFLevels = input.bool(false, 'رسم سطح HTF (ساده و Extend Right)')
+showHTFLabels = input.bool(false, 'نمایش نوشته روی سطح HTF کات‌شده')
+addHTFOnBOS   = input.bool(false, 'افزودن سطح HTF در لحظه BOS (روی lastSH/lastSL)')
+
+// —— Cross-TF orange circles ——
+showHTFSelectedCircles = input.bool(false, 'نمایش دایره‌های HTF انتخابی روی همین چارت')
+selectedHTF            = input.timeframe('15', 'تایم‌فریم HTF برای دایره‌ها')
+htfCircleColor         = input.color(color.fuchsia, 'رنگ دایرهٔ HTF انتخابی')
+htfCircleSizeStr = input.string('Small', 'اندازه دایره HTF (از تایم‌فریم انتخابی)', options = ['Tiny','Small','Normal','Large','Huge'])
+
+// —— NEW: Labels for “BOS after MSS” ——
+showAfterMSSLabel = input.bool(false, 'نمایش لیبل «MSS پس از BOS»')
+afterLabelColor   = input.color(color.fuchsia, 'رنگ لیبل «MSS پس از BOS»')
+afterLabelOffsetMultiplier = input.int(2, 'ضریب فاصلهٔ عمودی لیبل بعد MSS', minval = 1, maxval = 5)
+
+// ===== NEW: Pattern-detection inputs =====
+detectBullishPattern = input.bool(true, 'Detect Bullish LL→LH→LL→HH')
+patternLabelColor    = input.color(color.lime, 'Bullish pattern label color')
+drawGuideLL2toHH     = input.bool(true, 'Draw dotted guide from LL2 → HH when detected')
+
+detectBearishPattern      = input.bool(true, 'Detect Bearish HH→HL→HH→LL')
+bearishPatternLabelColor  = input.color(color.red, 'Bearish pattern label color')
+drawGuideHH2toLL          = input.bool(true, 'Draw dotted guide from HH2 → LL when detected')
+
+detectBearishCont      = input.bool(true, 'Detect Bearish HH→LL→LH→LL')
+bearishContLabelColor  = input.color(color.red, 'Bearish cont. label color')
+drawGuideLHtoLL2       = input.bool(true, 'Draw dotted guide from LH → LL2')
+
+detectBullishCont      = input.bool(true, 'Detect Bullish LL→HH→HL→HH')
+bullishContLabelColor  = input.color(color.lime, 'Bullish cont. label color')
+drawGuideHLtoHH2       = input.bool(true, 'Draw dotted guide from HL → HH2')
+
+detectBullishRev_HL   = input.bool(true, 'Detect Bullish LL→LH→HL→HH')
+bullishRevHLColor     = input.color(color.lime, 'Bullish reversal (HL) label color')
+drawGuideHLtoHH       = input.bool(true, 'Draw dotted guide from HL → HH')
+
+showProtected     = input.bool(true,  'Show Protected H/L')
+protLowColor      = input.color(color.lime, 'Protected Low line')
+protHighColor     = input.color(color.red,  'Protected High line')
+protLineWidth     = input.int(2, 'Protected line width', minval=1, maxval=5)
+protLabelBg       = input.color(color.new(color.black, 100), 'Protected label bg')
+protLabelTxtCol   = input.color(color.white, 'Protected label text')
+
+// --- NEW: Setup-only rendering + 50% midline ---
+onlySetupCircles = input.bool(true, 'Show ONLY setup circles (hide non-setup circles)')
+midlineColor     = input.color(color.orange, 'Setup 50% line color')
+midlineWidth     = input.int(1, 'Setup 50% line width', minval=1, maxval=5)
+extendMidline    = input.bool(false, 'Extend 50% line to the right')
+bullishSetupCircleColor = input.color(color.lime, 'Bullish setup circle color')
+bearishSetupCircleColor = input.color(color.red,  'Bearish setup circle color')
+
+// ---------- Helpers ----------
+bosTextSize = bosTextSizeStr == 'Tiny' ? size.tiny : bosTextSizeStr == 'Small' ? size.small : bosTextSizeStr == 'Normal' ? size.normal : size.large
+circleSize  = circleSizeStr  == 'Tiny' ? size.tiny : circleSizeStr  == 'Small' ? size.small : circleSizeStr  == 'Normal' ? size.normal : circleSizeStr == 'Large' ? size.large : size.huge
+htfCircleSize = htfCircleSizeStr == 'Tiny' ? size.tiny : htfCircleSizeStr == 'Small' ? size.small : htfCircleSizeStr == 'Normal' ? size.normal : htfCircleSizeStr == 'Large' ? size.large  : size.huge
+
+dy  = syminfo.mintick * labelOffsetTicks
+// extra vertical offset for the new label, to avoid overlaps
+dy2 = dy * afterLabelOffsetMultiplier
+
+useHighOrClose = breakType == 'Wick (High/Low)' ? high : close
+useLowOrClose  = breakType == 'Wick (High/Low)' ? low  : close
+f_midBar(_x1,_x2)=> int(math.round((_x1 + _x2) / 2.0))
+
+// ---- NEW: آخرین دایرهٔ High/Low برای مقایسهٔ HH/HL/LL/LH
+var float lastHighCircle = na
+var float lastLowCircle  = na
+
+// ===== NEW: storage for orange-circle events (dir/price/bar) =====
+var array<int>   crDir   = array.new_int()
+var array<float> crPrice = array.new_float()
+var array<int>   crBar   = array.new_int()
+
+// ===== NEW: helper to push circle event and keep list bounded =====
+f_push_circle(_dir, _price, _bar) =>
+    array.push(crDir,   _dir)
+    array.push(crPrice, _price)
+    array.push(crBar,   _bar)
+    // keep last ~300 events to avoid memory bloat
+    int cap = 300
+    if array.size(crDir) > cap
+        array.shift(crDir), array.shift(crPrice), array.shift(crBar)
+
+// ===== NEW: PATTERN CHECKERS =====
+
+// LL→LH→HL→HH (bullish reversal via HL)
+f_check_bullish_rev_hl() =>
+    bool ok = false
+    int i0 = na
+    int i1 = na
+    int i2 = na
+    int i3 = na
+    int n  = array.size(crDir)
+    float eps = syminfo.mintick * 0.5
+    if n >= 4
+        i3 := n - 1
+        i2 := n - 2
+        i1 := n - 3
+        i0 := n - 4
+        int   d0 = array.get(crDir,   i0)   // +2 (LL)
+        int   d1 = array.get(crDir,   i1)   // -2 (LH)
+        int   d2 = array.get(crDir,   i2)   // +2 (HL)
+        int   d3 = array.get(crDir,   i3)   // -2 (HH)
+        float p0 = array.get(crPrice, i0)   // LL
+        float p1 = array.get(crPrice, i1)   // LH
+        float p2 = array.get(crPrice, i2)   // HL
+        float p3 = array.get(crPrice, i3)   // HH
+        bool orderOK = (d0 ==  2) and (d1 == -2) and (d2 ==  2) and (d3 == -2)
+        bool priceOK = (p2 >= p0 - eps) and (p3 >= p1 - eps) // HL > LL, HH > LH
+        ok := orderOK and priceOK
+    [ok, i0, i1, i2, i3]
+
+// HH→LL→LH→LL (bearish continuation)
+f_check_bearish_cont() =>
+    bool ok = false
+    int i0 = na
+    int i1 = na
+    int i2 = na
+    int i3 = na
+    int n  = array.size(crDir)
+    if n >= 4
+        i3 := n - 1
+        i2 := n - 2
+        i1 := n - 3
+        i0 := n - 4
+        int   d0 = array.get(crDir,   i0)
+        int   d1 = array.get(crDir,   i1)
+        int   d2 = array.get(crDir,   i2)
+        int   d3 = array.get(crDir,   i3)
+        float p0 = array.get(crPrice, i0)   // HH1
+        float p1 = array.get(crPrice, i1)   // LL1
+        float p2 = array.get(crPrice, i2)   // LH
+        float p3 = array.get(crPrice, i3)   // LL2
+        bool orderOK = (d0 == -2) and (d1 ==  2) and (d2 == -2) and (d3 ==  2)
+        bool priceOK = (p2 < p0) and (p3 < p1)
+        ok := orderOK and priceOK
+    [ok, i0, i1, i2, i3]
+
+// LL→LH→LL→HH (bullish reversal)
+f_check_bullish_pattern() =>
+    bool ok = false
+    int i0 = na
+    int i1 = na
+    int i2 = na
+    int i3 = na
+    int n  = array.size(crDir)
+    if n >= 4
+        i3 := n - 1
+        i2 := n - 2
+        i1 := n - 3
+        i0 := n - 4
+        int   d0 = array.get(crDir,   i0)
+        int   d1 = array.get(crDir,   i1)
+        int   d2 = array.get(crDir,   i2)
+        int   d3 = array.get(crDir,   i3)
+        float p0 = array.get(crPrice, i0)  // LL1
+        float p1 = array.get(crPrice, i1)  // LH
+        float p2 = array.get(crPrice, i2)  // LL2
+        float p3 = array.get(crPrice, i3)  // HH
+        bool orderOK = (d0 ==  2) and (d1 == -2) and (d2 ==  2) and (d3 == -2)
+        bool priceOK = (p2 < p0) and (p3 > p1)
+        ok := orderOK and priceOK
+    [ok, i0, i1, i2, i3]
+
+// HH→HL→HH→LL (bearish reversal)
+f_check_bearish_pattern() =>
+    bool ok = false
+    int i0 = na
+    int i1 = na
+    int i2 = na
+    int i3 = na
+    int n  = array.size(crDir)
+    if n >= 4
+        i3 := n - 1
+        i2 := n - 2
+        i1 := n - 3
+        i0 := n - 4
+        int   d0 = array.get(crDir,   i0)
+        int   d1 = array.get(crDir,   i1)
+        int   d2 = array.get(crDir,   i2)
+        int   d3 = array.get(crDir,   i3)
+        float p0 = array.get(crPrice, i0)   // HH1
+        float p1 = array.get(crPrice, i1)   // HL
+        float p2 = array.get(crPrice, i2)   // HH2
+        float p3 = array.get(crPrice, i3)   // LL
+        bool orderOK = (d0 == -2) and (d1 ==  2) and (d2 == -2) and (d3 ==  2)
+        bool priceOK = (p2 > p0) and (p3 < p1)
+        ok := orderOK and priceOK
+    [ok, i0, i1, i2, i3]
+
+// LL→HH→HL→HH (bullish continuation)
+f_check_bullish_cont() =>
+    bool ok = false
+    int i0 = na
+    int i1 = na
+    int i2 = na
+    int i3 = na
+    int n  = array.size(crDir)
+    if n >= 4
+        i3 := n - 1
+        i2 := n - 2
+        i1 := n - 3
+        i0 := n - 4
+        int   d0 = array.get(crDir,   i0)
+        int   d1 = array.get(crDir,   i1)
+        int   d2 = array.get(crDir,   i2)
+        int   d3 = array.get(crDir,   i3)
+        float p0 = array.get(crPrice, i0)   // LL1
+        float p1 = array.get(crPrice, i1)   // HH1
+        float p2 = array.get(crPrice, i2)   // HL
+        float p3 = array.get(crPrice, i3)   // HH2
+        bool orderOK = (d0 ==  2) and (d1 == -2) and (d2 ==  2) and (d3 == -2)
+        bool priceOK = (p2 > p0) and (p3 > p1)
+        ok := orderOK and priceOK
+    [ok, i0, i1, i2, i3]
+
+// تابع محاسبهٔ دایرهٔ MSS در HTF انتخابی؛ خروجی فقط هنگام وقوع رویداد غیر-NA است
+f_calc_htf_circle() =>
+    // پیوت‌ها
+    phH = ta.pivothigh(high, left, right)
+    plH = ta.pivotlow(low,  left, right)
+
+    // وضعیت‌ها (HTF-scope)
+    var float h_lastSH = na
+    var float h_lastSL = na
+    var int   h_lastSHBar = na
+    var int   h_lastSLBar = na
+    if not na(phH)
+        h_lastSH := phH
+        h_lastSHBar := bar_index - right
+    if not na(plH)
+        h_lastSL := plH
+        h_lastSLBar := bar_index - right
+
+    var int h_brokenSHBar = na
+    var int h_brokenSLBar = na
+    var int h_structureDir = 0
+    var int h_lastBOSDir   = na
+
+    // ردیاب اکستریم از زمان آخرین BOS در HTF
+    var float h_trkHigh = na
+    var int   h_trkHighTime = na
+    var float h_trkLow  = na
+    var int   h_trkLowTime  = na
+
+    // به‌روزرسانی اکستریم‌ها بر اساس جهت BOS قبلی
+    if h_lastBOSDir == 1
+        if na(h_trkHigh) or high > h_trkHigh
+            h_trkHigh := high
+            h_trkHighTime := time
+    if h_lastBOSDir == -1
+        if na(h_trkLow) or low < h_trkLow
+            h_trkLow := low
+            h_trkLowTime := time
+
+    // شکست‌ها
+    bool bullBOSH = not na(h_lastSH) and (useHighOrClose > h_lastSH) and (na(h_brokenSHBar) or h_brokenSHBar != h_lastSHBar)
+    bool bearBOSH = not na(h_lastSL) and (useLowOrClose  < h_lastSL) and (na(h_brokenSLBar) or h_brokenSLBar != h_lastSLBar)
+
+    int preStructH = h_structureDir
+    bool mssPlusH  = bullBOSH and preStructH == -1
+    bool mssMinusH = bearBOSH and preStructH ==  1
+
+    // خروجی‌ها
+    float outPrice = na
+    int   outDir   = na   // +2 MSS+ ، -2 MSS-
+    int   outTime  = na   // زمان دقیق دایره (bar_time)
+
+    if mssPlusH and h_lastBOSDir == -1 and not na(h_trkLow)
+        outPrice := h_trkLow
+        outDir   :=  2
+        outTime  := h_trkLowTime
+        h_trkLow := na
+        h_trkLowTime := na
+
+    if mssMinusH and h_lastBOSDir == 1 and not na(h_trkHigh)
+        outPrice := h_trkHigh
+        outDir   := -2
+        outTime  := h_trkHighTime
+        h_trkHigh := na
+        h_trkHighTime := na
+
+    // پایان کندل HTF: به‌روزرسانی وضعیت‌ها بعد از BOS
+    if bullBOSH
+        h_brokenSHBar := h_lastSHBar
+        h_structureDir := 1
+        h_lastBOSDir := 1
+        h_trkHigh := high
+        h_trkHighTime := time
+    if bearBOSH
+        h_brokenSLBar := h_lastSLBar
+        h_structureDir := -1
+        h_lastBOSDir := -1
+        h_trkLow := low
+        h_trkLowTime := time
+
+    [outPrice, outDir, outTime]
+
+// ---------- Swings (فقط برای نمایش) ----------
+ph = ta.pivothigh(high, left, right)
+pl = ta.pivotlow(low,  left, right)
+isSH = not na(ph)
+isSL = not na(pl)
+
+// ---------- State ----------
+var float lastSH = na
+var float lastSL = na
+var int   lastSHBar = na
+var int   lastSLBar = na
+if isSH
+    lastSH := ph
+    lastSHBar := bar_index - right
+if isSL
+    lastSL := pl
+    lastSLBar := bar_index - right
+
+var int brokenSHBar = na
+var int brokenSLBar = na
+
+var int structureDir = 0   // +1 up, -1 down
+var int lastBOSBar   = na
+var int lastBOSDir   = na
+
+int preStructure = structureDir
+int preBOSBar    = lastBOSBar
+int preBOSDir    = lastBOSDir
+
+// ---------- ردیاب اکستریم از زمان آخرین BOS ----------
+var float trkHigh = na
+var int   trkHighBar = na
+var float trkLow  = na
+var int   trkLowBar  = na
+
+if preBOSDir == +1
+    if na(trkHigh) or high > trkHigh
+        trkHigh := high
+        trkHighBar := bar_index
+if preBOSDir == -1
+    if na(trkLow) or low < trkLow
+        trkLow := low
+        trkLowBar := bar_index
+
+// ---------- Breaks ----------
+bool bullBOS = not na(lastSH) and useHighOrClose > lastSH and (na(brokenSHBar) or brokenSHBar != lastSHBar)
+bool bearBOS = not na(lastSL) and useLowOrClose  < lastSL and (na(brokenSLBar) or brokenSLBar != lastSLBar)
+bool mssPlusNow  = bullBOS and preStructure == -1
+bool mssMinusNow = bearBOS and preStructure ==  1
+
+// ---------- NEW STATE: waiting for next BOS *after* an MSS ----------
+var int waitContDir = 0   // +1 = wait for bullish BOS after MSS+ ; -1 = wait for bearish BOS after MSS-
+if mssPlusNow
+    waitContDir :=  1
+if mssMinusNow
+    waitContDir := -1
+
+// ---------- داده‌های سطوح HTF ----------
+var array<float> htfY     = array.new_float()
+var array<int>   htfX1    = array.new_int()
+var array<line>  htfLine  = array.new_line()
+var array<bool>  htfLive  = array.new_bool()
+var array<label> htfLbl   = array.new_label()
+var array<int>   htfType  = array.new_int()
+
+f_addHTFLevel(_x, _y, _tp) =>
+    line ln = na
+    if drawHTFLevels
+        ln := line.new(_x, _y, _x + 1, _y, xloc=xloc.bar_index, extend=extend.right, color=color.new(circleColor, 20), width=1, style=line.style_solid)
+    array.push(htfY, _y)
+    array.push(htfX1, _x)
+    array.push(htfLine, ln)
+    array.push(htfLive, true)
+    array.push(htfLbl, na)
+    array.push(htfType, _tp)
+
+f_kindText(_tp) =>
+    string t = ''
+    if _tp == 2
+        t := 'HTF MSS +'
+    else if _tp == -2
+        t := 'HTF MSS -'
+    else if _tp == 1
+        t := 'HTF BOS +'
+    else
+        t := 'HTF BOS -'
+    t
+
+f_kindColor(_tp) =>
+    color c = bosColor
+    if math.abs(_tp) == 2
+        c := mssColor
+    c
+
+// ---------- Circle (label) helper ----------
+f_circle(_x, _y, _txt, _col) =>
+    label.new(x=_x, y=_y, style=label.style_circle, size=circleSize, text=showCircleRank ? _txt : '', textcolor=circleTextColor, color=color.new(_col, circleAlpha))
+
+// ---------- Helper: draw a setup (top/bottom circles + 50% midline + label) ----------
+// ---------- Helper: draw a setup (top/bottom circles + 50% midline + label) ----------
+f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor) =>
+    // read prices/bars for the 4-circle window
+    float p0 = array.get(crPrice, _i0)
+    float p1 = array.get(crPrice, _i1)
+    float p2 = array.get(crPrice, _i2)
+    float p3 = array.get(crPrice, _i3)
+    int   b0 = array.get(crBar,   _i0)
+    int   b1 = array.get(crBar,   _i1)
+    int   b2 = array.get(crBar,   _i2)
+    int   b3 = array.get(crBar,   _i3)
+
+    // find top/bottom (price + where they happened)
+    float topP = math.max(math.max(p0, p1), math.max(p2, p3))
+    float botP = math.min(math.min(p0, p1), math.min(p2, p3))
+    int   topBar = topP == p0 ? b0 : topP == p1 ? b1 : topP == p2 ? b2 : b3
+    int   botBar = botP == p0 ? b0 : botP == p1 ? b1 : botP == p2 ? b2 : b3
+
+    // draw only the two key circles for the setup (now colored by setup type)
+    f_circle(botBar, botP, '', _circColor)
+    f_circle(topBar, topP, '', _circColor)
+
+    // draw 50% midline
+    float mid = (topP + botP) / 2.0
+    int x2 = extendMidline ? bar_index + 1 : topBar
+    line.new(botBar, mid, x2, mid, xloc=xloc.bar_index, extend=extendMidline ? extend.right : extend.none,
+             color=midlineColor, width=midlineWidth, style=line.style_dotted)
+
+    // setup label near midline
+    float yLab = _labelUp ? (mid + dy) : (mid - dy)
+    label.new(bar_index, yLab, _name, style=label.style_label_center,
+              size=bosTextSize, textcolor=color.white, color=color.new(color.black, 100))
+
+// ===== draw circles + push events + detect pattern =====
+var bool justDrewCircle = false
+justDrewCircle := false
+
+if showCircle
+    // MSS+ ⇒ Low extreme circle
+    if mssPlusNow and preBOSDir == -1 and not na(trkLowBar)
+        string lowTag = ""
+        if not na(lastLowCircle)
+            lowTag := trkLow > lastLowCircle ? "HL" : trkLow < lastLowCircle ? "LL" : ""
+        // draw only if NOT in setup-only mode
+        if not onlySetupCircles
+            f_circle(trkLowBar, trkLow, lowTag, circleColor)
+        f_addHTFLevel(trkLowBar, trkLow, 2)
+        f_push_circle(2, trkLow, trkLowBar)
+        justDrewCircle := true
+        lastLowCircle := trkLow
+        trkLow := na
+        trkLowBar := na
+    // MSS- ⇒ High extreme circle
+    if mssMinusNow and preBOSDir == +1 and not na(trkHighBar)
+        string highTag = ""
+        if not na(lastHighCircle)
+            highTag := trkHigh > lastHighCircle ? "HH" : trkHigh < lastHighCircle ? "LH" : ""
+        if not onlySetupCircles
+            f_circle(trkHighBar, trkHigh, highTag, circleColor)
+        f_addHTFLevel(trkHighBar, trkHigh, -2)
+        f_push_circle(-2, trkHigh, trkHighBar)
+        justDrewCircle := true
+        lastHighCircle := trkHigh
+        trkHigh := na
+        trkHighBar := na
+
+// ===== DETECTIONS → draw ONLY setup elements =====
+
+// Bullish Reversal (LL→LH→LL→HH)
+// Bullish Reversal (LL→LH→LL→HH)
+if detectBullishPattern and justDrewCircle
+    [ok, i0, i1, i2, i3] = f_check_bullish_pattern()
+    if ok
+        f_draw_setup("Bullish Reversal", i0, i1, i2, i3, true, bullishSetupCircleColor)
+
+// Bullish Reversal (LL→LH→HL→HH)
+if detectBullishRev_HL and justDrewCircle
+    [okBR, a0, a1, a2, a3] = f_check_bullish_rev_hl()
+    if okBR
+        f_draw_setup("Bullish Reversal", a0, a1, a2, a3, true, bullishSetupCircleColor)
+
+// Bullish Continuation (LL→HH→HL→HH)
+if detectBullishCont and justDrewCircle
+    [okBC, m0, m1, m2, m3] = f_check_bullish_cont()
+    if okBC
+        f_draw_setup("Bullish Continuation", m0, m1, m2, m3, true, bullishSetupCircleColor)
+
+// Bearish Reversal (HH→HL→HH→LL)
+if detectBearishPattern and justDrewCircle
+    [okB, j0, j1, j2, j3] = f_check_bearish_pattern()
+    if okB
+        f_draw_setup("Bearish Reversal", j0, j1, j2, j3, false, bearishSetupCircleColor)
+
+// Bearish Continuation (HH→LL→LH→LL)
+if detectBearishCont and justDrewCircle
+    [okC, k0, k1, k2, k3] = f_check_bearish_cont()
+    if okC
+        f_draw_setup("Bearish Continuation", k0, k1, k2, k3, false, bearishSetupCircleColor)
+// (اختیاری) افزودن سطح HTF روی خودِ BOS
+if addHTFOnBOS and bullBOS
+    f_addHTFLevel(lastSHBar, lastSH, 1)
+if addHTFOnBOS and bearBOS
+    f_addHTFLevel(lastSLBar, lastSL, -1)
+
+// ---------- «کات» خودکار در اولین تماس قیمت ----------
+bool didCutThisBar = false
+int nHTF = array.size(htfY)
+if nHTF > 0
+    for i = 0 to nHTF - 1
+        bool live = array.get(htfLive, i)
+        if live
+            float y  = array.get(htfY, i)
+            bool hit = (low <= y) and (y <= high)
+            if hit
+                line ln = array.get(htfLine, i)
+                int  x1 = array.get(htfX1,  i)
+                if not na(ln)
+                    line.set_x1(ln, x1)
+                    line.set_x2(ln, bar_index)
+                    line.set_extend(ln, extend.none)
+                    line.set_style(ln, line.style_dashed)
+                    line.set_width(ln, 2)
+                    line.set_color(ln, color.new(circleColor, 0))
+                array.set(htfLive, i, false)
+                didCutThisBar := true
+
+                int   tp    = array.get(htfType, i)
+                string htfTxt = f_kindText(tp)
+                color  htfCol = f_kindColor(tp)
+
+                label oldLb = array.get(htfLbl, i)
+                if not na(oldLb)
+                    label.delete(oldLb)
+
+                int midBarOnCut = f_midBar(x1, bar_index)
+                label newLb = na
+                if showHTFLabels
+                    newLb := label.new(midBarOnCut, y + dy, htfTxt, style=label.style_label_center, size=bosTextSize, textcolor=htfCol, color=color.new(color.black, 100))
+                array.set(htfLbl, i, newLb)
+
+// ---------- رسم BOS/MSS + پیشوند HTF در صورت همزمانی با کات ----------
+if bullBOS
+    bool isMSSplus = mssPlusNow
+    color col = isMSSplus ? mssColor : bosColor
+    line.new(lastSHBar, lastSH, bar_index, lastSH, xloc=xloc.bar_index, extend=extend.none, color=col, width=bosWidth, style=isMSSplus ? line.style_dashed : line.style_dotted)
+    string txt = didCutThisBar ? (isMSSplus ? ' MSS +' : ' BOS +') : (isMSSplus ? 'MSS +' : 'BOS +')
+    if showLabels
+        midBar = f_midBar(lastSHBar, bar_index)
+        label.new(midBar, lastSH + dy, txt, style=label.style_label_center, size=bosTextSize, textcolor=col, color=color.new(color.black, 100))
+    brokenSHBar := lastSHBar
+    structureDir := 1
+    if showAfterMSSLabel and (waitContDir == 1) and (not isMSSplus)
+        midBarA = f_midBar(lastSHBar, bar_index)
+        label.new(midBarA, lastSH + dy2, 'BOS after MSS +', style=label.style_label_center, size=bosTextSize, textcolor=afterLabelColor, color=color.new(color.black, 100))
+        waitContDir := 0
+
+if bearBOS
+    bool isMSSminus = mssMinusNow
+    color col2 = isMSSminus ? mssColor : bosColor
+    line.new(lastSLBar, lastSL, bar_index, lastSL, xloc=xloc.bar_index, extend=extend.none, color=col2, width=bosWidth, style=isMSSminus ? line.style_dashed : line.style_dotted)
+    string txt2 = didCutThisBar ? (isMSSminus ? ' MSS -' : ' BOS -') : (isMSSminus ? 'MSS -' : 'BOS -')
+    if showLabels
+        midBar2 = f_midBar(lastSLBar, bar_index)
+        label.new(midBar2, lastSL + dy, txt2, style=label.style_label_center, size=bosTextSize, textcolor=col2, color=color.new(color.black, 100))
+    brokenSLBar := lastSLBar
+    structureDir := -1
+    if showAfterMSSLabel and (waitContDir == -1) and (not isMSSminus)
+        midBarB = f_midBar(lastSLBar, bar_index)
+        label.new(midBarB, lastSL + dy2, 'BOS after MSS -', style=label.style_label_center, size=bosTextSize, textcolor=afterLabelColor, color=color.new(color.black, 100))
+        waitContDir := 0
+
+// ---------- پایان کندل ----------
+if bullBOS
+    lastBOSBar := bar_index
+    lastBOSDir := +1
+    trkHigh := high
+    trkHighBar := bar_index
+
+if bearBOS
+    lastBOSBar := bar_index
+    lastBOSDir := -1
+    trkLow := low
+    trkLowBar := bar_index
+
+// ---------- HTF circles from selected timeframe (draw only circles) ----------
+if showHTFSelectedCircles
+    [htfPrice, htfDir, htfTime] = request.security(syminfo.tickerid, selectedHTF, f_calc_htf_circle(), gaps=barmerge.gaps_on)
+    bool newHTFCircle = not na(htfPrice)
+    if newHTFCircle
+        label.new(x=htfTime, y=htfPrice, xloc=xloc.bar_time, style=label.style_circle, size=htfCircleSize, text='HTF Circle', textcolor=color.new(htfCircleColor, circleAlpha), color=color.new(htfCircleColor, circleAlpha))
