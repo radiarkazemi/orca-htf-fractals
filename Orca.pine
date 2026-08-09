@@ -786,3 +786,5 @@ if showHTFSelectedCircles
     bool newHTFCircle = not na(htfPrice)
     if newHTFCircle
         label.new(x=htfTime, y=htfPrice, xloc=xloc.bar_time, style=label.style_circle, size=htfCircleSize, text='HTF Circle', textcolor=color.new(htfCircleColor, circleAlpha), color=color.new(htfCircleColor, circleAlpha))
+
+// last-DR same-color update: 2026-08-09T09:57:41Z
