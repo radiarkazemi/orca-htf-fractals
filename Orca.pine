@@ -149,8 +149,8 @@ showDrFibs       = input.bool(true, 'Show 0.618 / 0.786 levels', group = grpDR)
 midlineColor     = input.color(color.red, '50% line color', group = grpDR)
 midlineWidth     = input.int(2, '50% line width', minval = 1, maxval = 5, group = grpDR)
 drAhead          = input.int(8, 'Range bars ahead', minval = 1, maxval = 50, group = grpDR)
-drBoxTopBg       = input.color(color.new(color.gray, 85), 'Gray fill (bearish=top / bullish=bottom)', group = grpDR)
-drBoxBotBg       = input.color(color.new(color.red, 90), 'Red fill (bearish=bottom / bullish=top)', group = grpDR)
+drBoxTopBg       = input.color(color.new(color.gray, 85), 'Gray fill', group = grpDR)
+drBoxBotBg       = input.color(color.new(color.red, 90), 'Red fill (bullish=bottom / bearish=top)', group = grpDR)
 drFib618Color    = input.color(#A5D6A7, '0.618 color', group = grpDR)
 drFib786Color    = input.color(#4DD0E1, '0.786 color', group = grpDR)
 
@@ -551,13 +551,13 @@ f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _circColor, _name, 
     int x2 = math.max(topBar, botBar) + drAhead
     float mid = (topP + botP) / 2.0
     float rng = topP - botP
-    float y786 = botP + rng * 0.786
-    float y618 = botP + rng * 0.618
 
-    // Bearish (two red): red section DOWN, gray UP
-    // Bullish (two green): red section UP, gray DOWN
-    color upperBg = _bullish ? drBoxBotBg : drBoxTopBg
-    color lowerBg = _bullish ? drBoxTopBg : drBoxBotBg
+    // Bullish: red (discount) DOWN, gray UP — fibs from the high (OTE in lower half)
+    // Bearish: red (premium) UP, gray DOWN — fibs from the low (OTE in upper half)
+    color upperBg = _bullish ? drBoxTopBg : drBoxBotBg
+    color lowerBg = _bullish ? drBoxBotBg : drBoxTopBg
+    float y618 = _bullish ? topP - rng * 0.618 : botP + rng * 0.618
+    float y786 = _bullish ? topP - rng * 0.786 : botP + rng * 0.786
 
     array.push(boxes, box.new(x1, topP, x2, botP, xloc = xloc.bar_index, border_color = color.new(_circColor, 40), border_width = 1, bgcolor = color.new(color.black, 92), extend = extend.none))
     array.push(boxes, box.new(x1, topP, x2, mid, xloc = xloc.bar_index, border_color = color.new(color.black, 100), bgcolor = upperBg, extend = extend.none))
