@@ -153,6 +153,9 @@ drBoxTopBg       = input.color(color.new(color.gray, 85), 'Gray fill', group = g
 drBoxBotBg       = input.color(color.new(color.red, 90), 'Red fill (bullish=bottom / bearish=top)', group = grpDR)
 drFib618Color    = input.color(#A5D6A7, '0.618 color', group = grpDR)
 drFib786Color    = input.color(#4DD0E1, '0.786 color', group = grpDR)
+// Fake BOS filter: internal structure breaks must not flip the dealing range
+filterFakeBosDr = input.bool(true, 'Filter fake BOS for dealing range', group = grpDR, tooltip = 'Opposite DR only after the active dealing-range protected extreme is broken (bullish DR low / bearish DR high). Internal/fake BOS is ignored for DR.')
+minOppositeDrPct = input.int(50, 'Min opposite DR size vs prior %', minval = 0, maxval = 100, group = grpDR, tooltip = '0 = off. Reject an opposite dealing range smaller than this % of the prior range height (typical fake BOS boxes are tiny).')
 
 // ---- Hidden (disabled) — not shown in settings ----
 showLabels = false
@@ -520,6 +523,10 @@ var array<box>   drBoxes  = array.new_box()
 var array<line>  drLines  = array.new_line()
 var array<label> drLabels = array.new_label()
 
+// Active DR state for fake-BOS filter (mutated via array to avoid CE10088):
+// [0]=top  [1]=bot  [2]=bullish(1/0)  [3]=has(1/0)  [4]=protExtremeBroken(1/0)
+var array<float> drState = array.from(float(na), float(na), 1.0, 0.0, 0.0)
+
 // Previous setup circle in time order: +1 green / -1 red
 var int   prevCircSide  = 0
 var float prevCircPrice = na
@@ -544,6 +551,25 @@ f_clear_dr(boxes, lines, labels) =>
             if not na(lb)
                 label.delete(lb)
         array.clear(labels)
+
+// Gate opposite DR flips: require protected extreme break + optional min size.
+// Same-direction updates and first DR always allowed.
+f_dr_allowed(topP, botP, _bullish, state) =>
+    bool ok = true
+    if filterFakeBosDr and array.size(state) >= 5 and array.get(state, 3) == 1.0
+        bool wasBull = array.get(state, 2) == 1.0
+        if _bullish != wasBull
+            // 1) Protected extreme of the ACTIVE dealing range must be broken
+            //    bullish DR → break below DR low; bearish DR → break above DR high
+            if array.get(state, 4) != 1.0
+                ok := false
+            // 2) New opposite range must not be a tiny internal "fake" box
+            if ok and minOppositeDrPct > 0
+                float oldH = array.get(state, 0) - array.get(state, 1)
+                float newH = topP - botP
+                if oldH > 0 and newH < oldH * minOppositeDrPct / 100.0
+                    ok := false
+    ok
 
 f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _circColor, _name, _bullish) =>
     f_clear_dr(boxes, lines, labels)
@@ -570,9 +596,21 @@ f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _circColor, _name, 
         array.push(lines, line.new(x1, y786, x2, y786, xloc = xloc.bar_index, extend = extend.none, color = drFib786Color, width = 1, style = line.style_dotted))
         array.push(labels, label.new(x2, y786, '0.786', xloc = xloc.bar_index, style = label.style_label_left, size = size.tiny, textcolor = drFib786Color, color = color.new(color.black, 100)))
 
+f_try_paint_dr(boxes, lines, labels, state, topP, botP, topBar, botBar, _circColor, _name, _bullish) =>
+    bool painted = false
+    if topP > botP and f_dr_allowed(topP, botP, _bullish, state)
+        f_paint_dr(boxes, lines, labels, topP, botP, topBar, botBar, _circColor, _name, _bullish)
+        array.set(state, 0, topP)
+        array.set(state, 1, botP)
+        array.set(state, 2, _bullish ? 1.0 : 0.0)
+        array.set(state, 3, 1.0)
+        array.set(state, 4, 0.0)  // reset — new protected extreme
+        painted := true
+    painted
+
 // Draw setup circles + register both in time order (same-color → last DR only).
 // Returns only final prev-circle state (single tuple return — no nested unpack).
-f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, boxes, lines, labels, pSide, pPrice, pBar) =>
+f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, boxes, lines, labels, state, pSide, pPrice, pBar) =>
     float p0 = array.get(crPrice, _i0)
     float p1 = array.get(crPrice, _i1)
     float p2 = array.get(crPrice, _i2)
@@ -603,7 +641,7 @@ f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, boxes, lines, labe
         int hiBar1 = pPrice >= c1Price ? pBar : c1Bar
         int loBar1 = pPrice < c1Price ? pBar : c1Bar
         if hi1 > lo1
-            f_paint_dr(boxes, lines, labels, hi1, lo1, hiBar1, loBar1, _circColor, _name, _labelUp)
+            f_try_paint_dr(boxes, lines, labels, state, hi1, lo1, hiBar1, loBar1, _circColor, _name, _labelUp)
 
     // Circle 2 vs circle 1 (same setup color → always same-color consecutive)
     if showDealingRange and c2Bar != c1Bar
@@ -612,9 +650,21 @@ f_draw_setup(_name, _i0, _i1, _i2, _i3, _labelUp, _circColor, boxes, lines, labe
         int hiBar2 = c1Price >= c2Price ? c1Bar : c2Bar
         int loBar2 = c1Price < c2Price ? c1Bar : c2Bar
         if hi2 > lo2
-            f_paint_dr(boxes, lines, labels, hi2, lo2, hiBar2, loBar2, _circColor, _name, _labelUp)
+            f_try_paint_dr(boxes, lines, labels, state, hi2, lo2, hiBar2, loBar2, _circColor, _name, _labelUp)
 
     [side, c2Price, c2Bar]
+
+// Track whether price broke the active DR protected extreme (real MSS for DR flips).
+// Bullish DR is only "truly" invalidated for an opposite (bearish) DR after its low breaks.
+// Bearish DR needs its high broken before a bullish opposite DR is allowed.
+if filterFakeBosDr and array.get(drState, 3) == 1.0
+    float drTopNow = array.get(drState, 0)
+    float drBotNow = array.get(drState, 1)
+    bool drIsBull = array.get(drState, 2) == 1.0
+    if drIsBull and not na(drBotNow) and useLowOrClose < drBotNow
+        array.set(drState, 4, 1.0)
+    if not drIsBull and not na(drTopNow) and useHighOrClose > drTopNow
+        array.set(drState, 4, 1.0)
 
 // ===== track MSS extremes (+ optional orange circles) =====
 var bool justDrewCircle = false
@@ -657,7 +707,7 @@ if mssMinusNow and preBOSDir == +1 and not na(trkHighBar)
 if detectBullishPattern and justDrewCircle
     [ok, i0, i1, i2, i3] = f_check_bullish_pattern()
     if ok
-        [tSide, tPrice, tBar] = f_draw_setup("Bullish Reversal", i0, i1, i2, i3, true, bullishSetupCircleColor, drBoxes, drLines, drLabels, prevCircSide, prevCircPrice, prevCircBar)
+        [tSide, tPrice, tBar] = f_draw_setup("Bullish Reversal", i0, i1, i2, i3, true, bullishSetupCircleColor, drBoxes, drLines, drLabels, drState, prevCircSide, prevCircPrice, prevCircBar)
         prevCircSide := tSide
         prevCircPrice := tPrice
         prevCircBar := tBar
@@ -666,7 +716,7 @@ if detectBullishPattern and justDrewCircle
 if detectBullishRev_HL and justDrewCircle
     [okBR, a0, a1, a2, a3] = f_check_bullish_rev_hl()
     if okBR
-        [tSide2, tPrice2, tBar2] = f_draw_setup("Bullish Reversal", a0, a1, a2, a3, true, bullishSetupCircleColor, drBoxes, drLines, drLabels, prevCircSide, prevCircPrice, prevCircBar)
+        [tSide2, tPrice2, tBar2] = f_draw_setup("Bullish Reversal", a0, a1, a2, a3, true, bullishSetupCircleColor, drBoxes, drLines, drLabels, drState, prevCircSide, prevCircPrice, prevCircBar)
         prevCircSide := tSide2
         prevCircPrice := tPrice2
         prevCircBar := tBar2
@@ -675,7 +725,7 @@ if detectBullishRev_HL and justDrewCircle
 if detectBullishCont and justDrewCircle
     [okBC, m0, m1, m2, m3] = f_check_bullish_cont()
     if okBC
-        [tSide3, tPrice3, tBar3] = f_draw_setup("Bullish Continuation", m0, m1, m2, m3, true, bullishSetupCircleColor, drBoxes, drLines, drLabels, prevCircSide, prevCircPrice, prevCircBar)
+        [tSide3, tPrice3, tBar3] = f_draw_setup("Bullish Continuation", m0, m1, m2, m3, true, bullishSetupCircleColor, drBoxes, drLines, drLabels, drState, prevCircSide, prevCircPrice, prevCircBar)
         prevCircSide := tSide3
         prevCircPrice := tPrice3
         prevCircBar := tBar3
@@ -684,7 +734,7 @@ if detectBullishCont and justDrewCircle
 if detectBearishPattern and justDrewCircle
     [okB, j0, j1, j2, j3] = f_check_bearish_pattern()
     if okB
-        [tSide4, tPrice4, tBar4] = f_draw_setup("Bearish Reversal", j0, j1, j2, j3, false, bearishSetupCircleColor, drBoxes, drLines, drLabels, prevCircSide, prevCircPrice, prevCircBar)
+        [tSide4, tPrice4, tBar4] = f_draw_setup("Bearish Reversal", j0, j1, j2, j3, false, bearishSetupCircleColor, drBoxes, drLines, drLabels, drState, prevCircSide, prevCircPrice, prevCircBar)
         prevCircSide := tSide4
         prevCircPrice := tPrice4
         prevCircBar := tBar4
@@ -693,7 +743,7 @@ if detectBearishPattern and justDrewCircle
 if detectBearishCont and justDrewCircle
     [okC, k0, k1, k2, k3] = f_check_bearish_cont()
     if okC
-        [tSide5, tPrice5, tBar5] = f_draw_setup("Bearish Continuation", k0, k1, k2, k3, false, bearishSetupCircleColor, drBoxes, drLines, drLabels, prevCircSide, prevCircPrice, prevCircBar)
+        [tSide5, tPrice5, tBar5] = f_draw_setup("Bearish Continuation", k0, k1, k2, k3, false, bearishSetupCircleColor, drBoxes, drLines, drLabels, drState, prevCircSide, prevCircPrice, prevCircBar)
         prevCircSide := tSide5
         prevCircPrice := tPrice5
         prevCircBar := tBar5
